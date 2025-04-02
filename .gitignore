@@ -1,0 +1,6 @@
+**
+!.gitignore
+
+!proj0/
+!proj0/bin/
+!proj0/bin/main.ml
