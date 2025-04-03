@@ -32,59 +32,83 @@ type term =
   | TmIf of term * term * term
 
 
-type context = (name * tp) list
+type context = (var_name * tp) list
 type constr = (tp * tp) list
 
 exception UnificationError
 
-let rec generateconstraints context tm =
+let remove_binding (x : var_name) (ctx : context) : context =
+  List.filter (fun (y, _) -> y <> x) ctx
+
+let rec generateconstraints (ctx : context) (tm : term) : tp * constr =
   match tm with
-  | TmVar x -> (try [(List.assoc x context, TpVar x)] with Not_found -> []) (*not sure*)
-  | TmUnit| TmTrue | TmFalse | TmZero -> [] 
-  | TmSucc n -> let c = generateconstraints context n in 
-                (TpNat,TpVar x)
-  | TmPred ->
-  | TmIsZero n-> 
-  | TmLet(x,t1,t2) -> let c1 = generateconstraints context t1 in 
-                      let c2 = generateconstraints ((x,TpVar "x")::context) t2 in in c1@c2
-  | TmLam(x,typ,t1) -> generateconstraints ((x,typ)::context) t1 (*Adds x:typ to context*)
-  | TmFst t1 -> generateconstraints context t1
-  | TmSnd t1 -> generateconstraints context t1
-  | TmPair(t1,t2) -> let c1 = generateconstraints context t1 in
-                     let c2 = generateconstraints context t2 in
-                     (c1@c2) (*also not sure*)
-  | TmApp(t1,t2)->let c1 = generateconstraints context t1 in 
-                  let c2 = generateconstraints context t2 in
-                  let t1= List.assoc t1 context in
-                  let t2 = List.assoc t2 context in 
-                  ((t1,TpArr(t2, TpVar "x"))::(c1@c2))
-    (*TmIF : ensures condition is bool*)
-  | TmIf(cond,t1,t2)-> let c1 = generateconstraints context cond in
-                       let c2 = generateconstraints context t1 in
-                       let c3 = generateconstraints context t2 in
-                       ((List.assoc cond, TpBool):: (List.assoc t1 context, List.assoc t2 i=context)::(c1@c2@c3))
+  | TmVar x ->(match List.assoc_opt x ctx with
+              | Some t -> (t, [])
+              | None -> failwith ("Variable "^ x ^" not found"))
+  | TmUnit ->  (TpUnit, [(TpUnit, TpUnit)])
+  | TmTrue ->  (TpBool, [(TpBool, TpBool)])
+  | TmFalse -> (TpBool, [(TpBool, TpBool)])
+  | TmZero ->  (TpNat, [(TpNat, TpNat)])
+  | TmSucc t1 -> let (typ, c) = generateconstraints ctx t1 in (TpNat, c @ [(typ, TpNat)]) (* enforce that t1: TpNat *)
+  | TmPred t1 -> let (typ, c) = generateconstraints ctx t1 in (TpNat, c @ [(typ, TpNat)])
+  | TmIsZero t1 -> let (typ, c) = generateconstraints ctx t1 in(TpBool, c @ [(typ, TpNat)]) (* enforce t1:TpNat and the result is a bool*)
+  | TmLam((x, typ), t1) -> let (t1_type, c) = generateconstraints ((x, typ) :: ctx)  t1 in (TpArr(typ, t1_type), c)
+  | TmApp(t1, t2) -> let (t1_type, c1) = generateconstraints ctx t1 in
+                     let (t2_type, c2) = generateconstraints ctx t2 in
+                     let f = TpVar "x_app" in  
+                     let c_app = [(t1_type, TpArr(t2_type, f))] in (f, c1 @ c2 @ c_app)
+  | TmLet(x, t1, t2) -> let (t1_type, c1) = generateconstraints ctx t1 in
+        let f= TpVar x in  
+        let ctx' = (x, f) :: (remove_binding x ctx) in
+        let (t2_type, c2) = generateconstraints ctx' t2 in
+        let c_let = [(f, t1_type)] in
+        (t2_type, c1 @ c_let @ c2)
+  | TmPair(t1, t2) -> let (ty1, c1) = generateconstraints ctx t1 in 
+                      let (ty2, c2) = generateconstraints ctx t2 in (TpPair(ty1, ty2), c1 @ c2)
+  | TmFst t1 ->  let (typ, c) = generateconstraints ctx t1 in
+                 let a = TpVar "a_fst" and b = TpVar "b_fst" in
+                 let c_fst = [(typ, TpPair(a, b))] in  (a, c @ c_fst)
+  | TmSnd t1 -> let (typ, c) = generateconstraints ctx t1 in
+                let a = TpVar "a_snd" and b = TpVar "b_snd" in
+                let c_snd = [(typ, TpPair(a, b))] in (b, c @ c_snd)
+  | TmIf(cond, t1, t2) -> let (cond_type, c_cond) = generateconstraints ctx cond in
+                          let (t1_type, c1) = generateconstraints ctx t1 in
+                          let (t2_type, c2) = generateconstraints ctx t2 in
+                          (* Condition must be boolean and branches must have the same type *)
+                          let c_if = [(cond_type, TpBool); (t1_type, t2_type)] in
+                          (t1_type, c_cond @ c1 @ c2 @ c_if)
 
 
 
 let rec unify constraints= 
 match constraints with 
 |  [] -> [] (*If constraint set is empty*)
-| (s,t):: C' -> if s=t then unify C' 
+| (s,t):: c' -> if s=t then unify c' 
                 else match (s,t) with
-                | (TpVar x,t) when not (freevarscheck(x t))-> (x,t) ::unify (subst(x,t)  C') (*Add the constraint*)
-                | (t,TpVar x) when not (freevarscheck(x t))-> (t,x) ::unify (subst(t,x)  C') (*Symmetric*)
-                | (TpArr(s1,s2), TpArr(t1,t2)) -> unify((s1,t1)::(s2,t2)::C')
-                | (*Case for user defined TO DO*)
-                | _ -> failwith UnificationError
+                | (TpVar x,t) when not (freevarscheck x t)-> (x,t) ::unify (subst(x,t)  c') (*Add the constraint*)
+                | (t,TpVar x) when not (freevarscheck x t)-> (x,t) ::unify (subst(x,t)  c') (*Symmetric*)
+                | (TpArr(s1,s2), TpArr(t1,t2)) -> unify((s1,t1)::(s2,t2)::c')
+                 (*Case for user defined TO DO*)
+                | _ -> raise UnificationError
 
 
-  let rec freevarscheck x t =
+  and freevarscheck x t =
   match t with 
   | TpVar y -> x=y
   | TpArr(t1,t2) -> freevarscheck x t1 || freevarscheck x t2
-  | TmPair(t1,t2) -> freevarscheck x t1 || freevarscheck x t2
+  | TpPair(t1,t2) -> freevarscheck x t1 || freevarscheck x t2
     (* |Case for user defined TO DO*)
   |  _ -> false
 
-  let rec subst  =
-
+  and subst ((x:type_name), (t:tp)) (constraints:constr) : constr =
+    List.map (fun (s, u) -> (replace x t s, replace x t u)) constraints
+  
+    (* [X/T] T' *) (* REF: tb section 22.1.1 *)
+    and replace (x:type_name) (t:tp) (t':tp) : tp  =
+    match t' with
+    | TpVar y -> if y = x then t else t'  (* ?? *)
+    | TpDef (y, t1) -> if y = x then t else TpDef (y, replace x t t1) (* (name, List.map (replace x t) t1)*)
+    | TpArr (t1, t2) -> TpArr (replace x t t1, replace x t t2)
+    | TpPair (t1, t2) -> TpPair (replace x t t1, replace x t t2)
+    | _ -> t'
+  
