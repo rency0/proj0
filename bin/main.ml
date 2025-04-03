@@ -38,6 +38,8 @@ type context = (var_name * tp) list
 type sigma  = (type_name * tp) list
 type constr = (tp * tp) list 
 
+exception UnificationError
+
 
 (* Pretty printing functions *)
 let rec tp_to_str (t:tp) : string = match t with 
