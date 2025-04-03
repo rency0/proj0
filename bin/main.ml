@@ -82,10 +82,6 @@ let rec unify (constraints:constr) : sigma =
         | (t, TpDef (x, s)) -> unify ((TpVar x, s) :: (TpVar x , t) :: rest )
         | (TpVar x, t) when not (occurs x t) -> (x, t) :: unify (subst (x, t) rest)
         | (t, TpVar x) when not (occurs x t) -> (x, t) :: unify (subst (x, t) rest)
-        | (TpVar x , TpVar y) -> (
-          if x <> y then failwith "Unification Failed"
-          else (print_endline "Unifying Vars"; unify rest )
-        )
         | ( _ , _ ) -> failwith "Unification Failed"
         
   (* X ∈ FV(T) *)
@@ -121,14 +117,26 @@ and subst ((x:type_name), (t:tp)) (constraints:constr) : constr =
 
 
 (* Testing *)
-let () = unify_print ([
+
+let () = (* tests all passing unify branches *) unify_print ([
+  
 (* (Bool -> Unit, Y) = ( Y -> Unit, X)  *)  
-(*
 ((TpPair(TpArr(TpBool, TpUnit), TpVar "Y")), 
-  ((TpPair(TpArr(TpVar "Y", TpUnit), TpVar "X")))); 
-*) 
+((TpPair(TpArr(TpVar "Y", TpUnit), TpVar "X")))); 
+
 (* Var "A" = Def "B":Nat ; A->C = A->Bool *)
 (TpVar "A", TpDef ("B", TpNat));
 (TpArr (TpVar "A", TpVar "C"), TpArr (TpVar "B", TpBool)); 
 
+(* Var "D" = Var "E" *)
+(TpVar "D", TpVar "E"); (TpVar "D", TpBool) ; 
+ 
+(* Def "Z" := "A"->"C", Var "Z" *)
+(TpDef ("Z", TpArr (TpVar "A", TpVar "C")), TpVar "Z"); 
+
 ]) 
+
+
+let () = unify_print ([
+  (TpVar "D", TpVar "E"); (TpVar "D", TpBool) ; (TpNat, TpVar "E")
+])
