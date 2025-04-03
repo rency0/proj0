@@ -11,15 +11,16 @@ type tp =
 
 
 type term = 
-  | TmTrue | TmFalse 
-  | TmUnit
-  | TmIf of term * term * term
-  | TmPair of term * term
-  | TmFst of term
-  | TmSnd of term
-  | TmVar of string
-  | TmLam of string * tp * term
-  | TmApp of term * term
+| TmTrue | TmFalse 
+| TmUnit
+| TmZero
+| TmIf of term * term * term
+| TmPair of term * term
+| TmFst of term
+| TmSnd of term
+| TmVar of string
+| TmLam of string * tp * term
+| TmApp of term * term
 
 
 type context = (name * tp) list
@@ -27,15 +28,28 @@ type constr = (tp * tp) list
 
 exception UnificationError
 
-
-let rec generateconstraints context tm = 
-  | TmTrue -> 
-  | TmFalse -> 
-  | TmApp(e1,e2)-> let t1,c1= generateconstraints context e1 in
-                    let t2,c2= generateconstraints context e2 in  
-
-  | TpArr(t1,t2)-> 
-  | TmIf(cond,t1)-> 
+let rec generateconstraints context tm =
+  match tm with
+  | TmVar x -> [] 
+  | TmUnit -> []
+  | TmTrue -> []
+  | TmFalse -> []
+  | TmZero -> []
+  | TmSucc n -> 
+  | TmLam(s,typ,t1) -> 
+  | TmFst t1 ->
+  | TmSnd t1 _>
+  | 
+  | TmApp(t1,t2)-> let c1 = generateconstraints context t1 in 
+                  let c2 = generateconstraints context t2 in
+                  let t1= List.assoc t1 context in
+                  let t2 = List.assoc t2 context in 
+                  (t1,TpArr(t2, TpVar "x"))::(c1@c2)
+    (*TmIF : ensures condition is bool*)
+  | TmIf(cond,t1,t2)-> let c1 = generateconstraints context cond in
+                       let c2 = generateconstraints context t1 in
+                       let c3 = generateconstraints context t2 in
+                       ((List.assoc cond, TpBool):: (List.assoc t1 context, List.assoc t2 i=context)::(c1@c2@c3))
 
 let rec unify constraints= 
 match constraints with 
