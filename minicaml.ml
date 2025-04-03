@@ -44,8 +44,9 @@ let rec generateconstraints context tm =
   | TmSucc n -> let c = generateconstraints context n in 
                 (TpNat,TpVar x)
   | TmPred ->
-  | TmIsZero ->
-  | TmLet ->
+  | TmIsZero n-> 
+  | TmLet(x,t1,t2) -> let c1 = generateconstraints context t1 in 
+                      let c2 = generateconstraints ((x,TpVar "x")::context) t2 in in c1@c2
   | TmLam(x,typ,t1) -> generateconstraints ((x,typ)::context) t1 (*Adds x:typ to context*)
   | TmFst t1 -> generateconstraints context t1
   | TmSnd t1 -> generateconstraints context t1
