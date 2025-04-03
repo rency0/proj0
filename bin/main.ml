@@ -8,9 +8,10 @@ type tp =
   | TpPair of tp * tp   (* (T1, T2) *)
   | TpVar of type_name  (* type "X" *)
   | TpDef of type_name * tp  (* define "X" = type *)
+  
 
-
-type term = 
+(* TODO: add FIX term *)
+type term =
   | TmUnit
   | TmVar of var_name
   | TmLet of var_name * term * term (* let x = t1 in t2 *)
@@ -69,13 +70,57 @@ let print_sigma (sigma:sigma) : unit =
   List.iter (fun (x, t) -> Printf.printf "%s = %s\n" x (tp_to_str t)) sigma
 (* ------------------------- *)
 
-(* construction of type substitutions satisfying the constraints *)
+(* creation of constraints based off of term *)
+let remove_binding (x : var_name) (ctx : context) : context =
+  List.filter (fun (y, _) -> y <> x) ctx
+
+let rec generateconstraints (ctx : context) (tm : term) : tp * constr =
+  match tm with
+  | TmVar x ->(match List.assoc_opt x ctx with
+              | Some t -> (t, [])
+              | None -> failwith ("Variable "^ x ^" not found"))
+  | TmUnit ->  (TpUnit, [])
+  | TmTrue ->  (TpBool, [])
+  | TmFalse -> (TpBool, [])
+  | TmZero ->  (TpNat, [])
+  | TmSucc t1 -> let (typ, c) = generateconstraints ctx t1 in (TpNat, c @ [(typ, TpNat)]) (* enforce that t1: TpNat *)
+  | TmPred t1 -> let (typ, c) = generateconstraints ctx t1 in (TpNat, c @ [(typ, TpNat)])
+  | TmIsZero t1 -> let (typ, c) = generateconstraints ctx t1 in(TpBool, c @ [(typ, TpNat)]) (* enforce t1:TpNat and the result is a bool*)
+  | TmLam((x, typ), t1) -> let (t1_type, c) = generateconstraints ((x, typ) :: ctx)  t1 in (TpArr(typ, t1_type), c)
+  | TmApp(t1, t2) -> let (t1_type, c1) = generateconstraints ctx t1 in
+                      let (t2_type, c2) = generateconstraints ctx t2 in
+                      let f = TpVar (term_to_str(t1) ^ "x_app") in  
+                      let c_app = [(t1_type, TpArr(t2_type, f))] in (f, c1 @ c2 @ c_app)
+  | TmLet(x, t1, t2) -> let (t1_type, c1) = generateconstraints ctx t1 in
+        let f= TpVar x in  
+        let ctx' = (x, f) :: (remove_binding x ctx) in
+        let (t2_type, c2) = generateconstraints ctx' t2 in
+        let c_let = [(f, t1_type)] in
+        (t2_type, c1 @ c_let @ c2)
+  | TmPair(t1, t2) -> let (ty1, c1) = generateconstraints ctx t1 in 
+                      let (ty2, c2) = generateconstraints ctx t2 in (TpPair(ty1, ty2), c1 @ c2)
+  | TmFst t1 ->  let (typ, c) = generateconstraints ctx t1 in
+                  let a = TpVar ((term_to_str t1) ^"_a_fst") and b = TpVar ((term_to_str t1) ^"_b_fst") in
+                  let c_fst = [(typ, TpPair(a, b))] in  (a, c @ c_fst)
+  | TmSnd t1 -> let (typ, c) = generateconstraints ctx t1 in
+                let a = TpVar  ((term_to_str t1) ^"_a_snd") and b = TpVar  ((term_to_str t1) ^"_b_snd") in
+                let c_snd = [(typ, TpPair(a, b))] in (b, c @ c_snd)
+  | TmIf(cond, t1, t2) -> let (cond_type, c_cond) = generateconstraints ctx cond in
+                          let (t1_type, c1) = generateconstraints ctx t1 in
+                          let (t2_type, c2) = generateconstraints ctx t2 in
+                          (* Condition must be boolean and branches must have the same type *)
+                          let c_if = [(cond_type, TpBool); (t1_type, t2_type)] in
+                          (t1_type, c_cond @ c1 @ c2 @ c_if)
+
+
+
+  (* construction of type substitutions satisfying the constraints *)
 let rec unify (constraints:constr) : sigma =
   match constraints with
   | [] -> []
   | (s, t) :: rest ->
       if s = t then unify rest
-      else match (s, t) with
+      else (print_endline (tp_to_str s ^ " = " ^ tp_to_str t);  match (s, t) with
         | (TpArr (s1, s2), TpArr (t1, t2)) -> unify ((s1, t1) :: (s2, t2) :: rest)
         | (TpPair (s1, s2), TpPair (t1, t2)) -> unify ((s1, t1) :: (s2, t2) :: rest)
         | (TpDef (x, s), t) -> unify ((TpVar x, s) :: (TpVar x , t) :: rest )
@@ -83,7 +128,7 @@ let rec unify (constraints:constr) : sigma =
         | (TpVar x, t) when not (occurs x t) -> (x, t) :: unify (subst (x, t) rest)
         | (t, TpVar x) when not (occurs x t) -> (x, t) :: unify (subst (x, t) rest)
         | ( _ , _ ) -> failwith "Unification Failed"
-        
+      )
   (* X ∈ FV(T) *)
 and occurs (x:type_name) (t:tp) : bool =
   match t with
@@ -100,8 +145,8 @@ and subst ((x:type_name), (t:tp)) (constraints:constr) : constr =
   (* [X/T] T' *) (* REF: tb section 22.1.1 *)
   and replace (x:type_name) (t:tp) (t':tp) : tp  =
   match t' with
-  | TpVar y -> if y = x then t else t'  (* ?? *)
-  | TpDef (y, t1) -> if y = x then t else TpDef (y, replace x t t1) (* (name, List.map (replace x t) t1)*)
+  | TpVar y -> if y = x then t else t'  (* THINK ?? *)
+  | TpDef (y, t1) -> if y = x then t else TpDef (y, replace x t t1) (* THINK (name, List.map (replace x t) t1)*)
   | TpArr (t1, t2) -> TpArr (replace x t t1, replace x t t2)
   | TpPair (t1, t2) -> TpPair (replace x t t1, replace x t t2)
   | _ -> t'
@@ -118,25 +163,41 @@ and subst ((x:type_name), (t:tp)) (constraints:constr) : constr =
 
 (* Testing *)
 
-let () = (* tests all passing unify branches *) unify_print ([
-  
-(* (Bool -> Unit, Y) = ( Y -> Unit, X)  *)  
-((TpPair(TpArr(TpBool, TpUnit), TpVar "Y")), 
-((TpPair(TpArr(TpVar "Y", TpUnit), TpVar "X")))); 
+(*
 
-(* Var "A" = Def "B":Nat ; A->C = A->Bool *)
-(TpVar "A", TpDef ("B", TpNat));
-(TpArr (TpVar "A", TpVar "C"), TpArr (TpVar "B", TpBool)); 
+  (* ---- succsesful programs ----  *)
+(* inc=λx.(s x) ; p=(T, 0) ; if (p.fst) then (inc p.snd) else (inc (inc p.snd))*)
+let program =   
+  TmLet ("inc",
+    TmLam (("x", TpNat), TmSucc (TmVar "x")),
+  TmLet ("p",
+    TmPair (TmTrue, TmZero),
+  TmIf (TmFst (TmVar "p"),
+    TmApp (TmVar "inc", TmSnd (TmVar "p")),
+    TmApp (TmVar "inc", TmApp( TmVar "inc", TmSnd (TmVar "p"))))))
+let (final_type, constraints) =  (generateconstraints [] program)
+let () = unify_print constraints
+(* -------------------------  *)
 
-(* Var "D" = Var "E" *)
-(TpVar "D", TpVar "E"); (TpVar "D", TpBool) ; 
- 
-(* Def "Z" := "A"->"C", Var "Z" *)
-(TpDef ("Z", TpArr (TpVar "A", TpVar "C")), TpVar "Z"); 
+(* x=(0 , 1) ; y=(T, F) ; if (x.fst == 0) then y.fst else y.snd*)
+let program = TmLet ("x", TmPair (TmZero, TmSucc (TmZero)) , 
+              TmLet("y" , TmPair(TmTrue, TmFalse), 
+              TmIf (TmIsZero (TmFst (TmVar "x")), TmFst (TmVar "y"), TmSnd (TmVar "y"))))
 
-]) 
+let (final_type, constraints) =  (generateconstraints [] program)
+let () = unify_print constraints
+
+(* -------------------------  *)
 
 
-let () = unify_print ([
-  (TpVar "D", TpVar "E"); (TpVar "D", TpBool) ; (TpNat, TpVar "E")
-])
+(* x=0 ; p=(x, x) ; lambda y : (A, A) = if (y.fst iszero) then (y.snd) else 0 *)
+let program = 
+  TmLet ("x", TmZero, 
+  TmLet ("p", TmPair (TmVar "x", TmVar "x"), 
+  TmLam (("y", TpPair (TpVar("A"),TpVar("A"))), 
+  TmIf (TmIsZero (TmFst (TmVar "y")), TmSnd (TmVar "y"), TmZero))))
+let (final_type, constraints) =  (generateconstraints [] program)
+let () = unify_print constraints
+
+
+*) 
