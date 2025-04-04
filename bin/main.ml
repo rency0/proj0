@@ -1,5 +1,5 @@
 
-type type_name = string
+type type_name = string  
 type var_name = string 
 
 type tp = 
@@ -9,8 +9,6 @@ type tp =
   | TpVar of type_name  (* type "X" *)
   | TpDef of type_name * tp  (* define "X" = type *)
   
-
-(* TODO: add FIX term *)
 type term =
   | TmUnit
   | TmVar of var_name
@@ -24,15 +22,17 @@ type term =
   | TmSucc of term 
   | TmPred of term
   (* L-calc *)
-  | TmLam of (var_name * tp) * term (*THINK: maybe don't need type in λ (x:T) . t*)
+  | TmLam of (var_name * tp) * term 
   | TmApp of term * term
+  | TmFix of (var_name * tp)  * term * term 
   (* Pairs *)
   | TmPair of term * term 
   | TmFst of term 
   | TmSnd of term
   (* If then else *)
-  | TmIf of term * term * term
-  | TmFix of var_name  * term * term (* let rec x = t1 in t2 *)
+  | TmIf of term * term * term 
+  | TmTypedef of (type_name * tp) * term (* define type X = T in t1 *)
+  
 
 
 type context = (var_name * tp) list
@@ -67,7 +67,8 @@ let rec term_to_str (t:term) : string = match t with
   | TmFst t1 -> "fst " ^ (term_to_str t1)
   | TmSnd t1 -> "snd " ^ (term_to_str t1)
   | TmIf (t1, t2, t3) -> "if (" ^ (term_to_str t1) ^ ") then {" ^ (term_to_str t2) ^ "} else {" ^ (term_to_str t3) ^ "}"
-  | TmFix (x, t1, t2) -> "let rec " ^ x ^ " = " ^ (term_to_str t1) ^ " in " ^ (term_to_str t2)
+  | TmFix ((x, tp) , t1, t2) -> "let rec " ^ x ^ ":" ^ (tp_to_str tp) ^ " = " ^ (term_to_str t1) ^ " in " ^ (term_to_str t2)
+  | TmTypedef ((x, tp), t) -> "let type " ^ x ^ " := " ^ (tp_to_str tp) ^ " in " ^ (term_to_str t) 
 let print_constraints (constraints:constr) : unit = 
   List.iter (fun (s, t) -> Printf.printf "%s = %s\n" (tp_to_str s) (tp_to_str t)) constraints
 let print_sigma (sigma:sigma) : unit =
@@ -90,10 +91,10 @@ let rec generateconstraints (ctx : context) (tm : term) : tp * constr =
   | TmSucc t1 -> let (typ, c) = generateconstraints ctx t1 in (TpNat, c @ [(typ, TpNat)]) (* enforce that t1: TpNat *)
   | TmPred t1 -> let (typ, c) = generateconstraints ctx t1 in (TpNat, c @ [(typ, TpNat)])
   | TmIsZero t1 -> let (typ, c) = generateconstraints ctx t1 in(TpBool, c @ [(typ, TpNat)]) (* enforce t1:TpNat and the result is a bool*)
-  | TmLam((x, typ), t1) -> let (t1_type, c) = generateconstraints ((x, typ) :: ctx)  t1 in (TpArr(typ, t1_type), c)
+  | TmLam((x, typ), t1) -> let (t1_type, c) = generateconstraints ((x, typ) :: ctx)  t1 in (TpArr(typ, t1_type), c) (* THINK : do we need to remove x from the og ctx?*)
   | TmApp(t1, t2) -> let (t1_type, c1) = generateconstraints ctx t1 in
                       let (t2_type, c2) = generateconstraints ctx t2 in
-                      let f = TpVar (term_to_str(t1) ^ "x_app") in  
+                      let f = TpVar ("'" ^ term_to_str(t1) ^ "'_x_app") in  
                       let c_app = [(t1_type, TpArr(t2_type, f))] in (f, c1 @ c2 @ c_app)
   | TmLet(x, t1, t2) -> let (t1_type, c1) = generateconstraints ctx t1 in
         let f= TpVar x in  
@@ -104,10 +105,10 @@ let rec generateconstraints (ctx : context) (tm : term) : tp * constr =
   | TmPair(t1, t2) -> let (ty1, c1) = generateconstraints ctx t1 in 
                       let (ty2, c2) = generateconstraints ctx t2 in (TpPair(ty1, ty2), c1 @ c2)
   | TmFst t1 ->  let (typ, c) = generateconstraints ctx t1 in
-                  let a = TpVar ((term_to_str t1) ^"_a_fst") and b = TpVar ((term_to_str t1) ^"_b_fst") in
+                  let a = TpVar ("'" ^ term_to_str(t1) ^ "_a_fst") and b = TpVar ("'" ^ term_to_str(t1) ^ "'_b_fst") in
                   let c_fst = [(typ, TpPair(a, b))] in  (a, c @ c_fst)
   | TmSnd t1 -> let (typ, c) = generateconstraints ctx t1 in
-                let a = TpVar  ((term_to_str t1) ^"_a_snd") and b = TpVar  ((term_to_str t1) ^"_b_snd") in
+                let a = TpVar  ("'" ^ term_to_str(t1) ^ "'_a_snd") and b = TpVar  ("'" ^ term_to_str(t1) ^ "'_b_snd") in
                 let c_snd = [(typ, TpPair(a, b))] in (b, c @ c_snd)
   | TmIf(cond, t1, t2) -> let (cond_type, c_cond) = generateconstraints ctx cond in
                           let (t1_type, c1) = generateconstraints ctx t1 in
@@ -115,21 +116,22 @@ let rec generateconstraints (ctx : context) (tm : term) : tp * constr =
                           (* Condition must be boolean and branches must have the same type *)
                           let c_if = [(cond_type, TpBool); (t1_type, t2_type)] in
                           (t1_type, c_cond @ c1 @ c2 @ c_if)                          
-  | TmFix(x, t1, t2) -> 
-          let f = TpVar (x) in  
-          let ctx' = (x, f) :: ctx in  (* Add the recursive function to the context *)
-          let (t1_type, c1) = generateconstraints ctx' t1 in  (* First, generate the type for the function body t1 *)
-          let (t2_type, c2) = generateconstraints ctx' t2 in  (* Then, for the function body t2 *)
-          let c_rec = [(t1_type, TpArr (f, t2_type)); (t2_type, f)] in  (* Enforce the function type to be of the form A -> A *)
-          (t2_type, c1 @ c2 @ c_rec)
-
+  | TmFix((x, typ), t1, t2) -> 
+     let ctx' = (x, typ) :: (remove_binding x ctx) in
+     let (t1_type, c1) = generateconstraints ctx' t1 in
+     let c_fix = [(t1_type, typ)] in
+     let (t2_type, c2) = generateconstraints ctx' t2 in
+     (t2_type, c1 @ c_fix @ c2)
+  | TmTypedef _ -> failwith "todo"
+  
   (* construction of type substitutions satisfying the constraints *)
 let rec unify (constraints:constr) : sigma =
   match constraints with
   | [] -> []
-  | (s, t) :: rest ->
-      if s = t then unify rest
-      else (match (s, t) with
+  | (s, t) :: rest -> 
+    print_endline ("\t>> "^ (tp_to_str s) ^ " = " ^ tp_to_str t ^ "\n" ) ; (print_constraints rest); print_endline "" ;
+    if s = t then unify rest
+    else  (match (s, t) with 
         | (TpArr (s1, s2), TpArr (t1, t2)) -> unify ((s1, t1) :: (s2, t2) :: rest)
         | (TpPair (s1, s2), TpPair (t1, t2)) -> unify ((s1, t1) :: (s2, t2) :: rest)
         | (TpDef (x, s), t) -> unify ((TpVar x, s) :: (TpVar x , t) :: rest )
@@ -177,18 +179,31 @@ let check_type (program:term) (intended_type:tp) : unit =
 
 (* ---- succsesful programs ----  *)
 
+(* *)
+let prog = TmTypedef (("natPair", TpPair (TpNat, TpNat)), 
+    TmLam (("p", TpArr (TpVar "natPair", TpUnit) ),  TmUnit))
+
+(* for(i) = if (iszero i) then Unit else for(pred i)*)
+let rec_prog = TmFix ( ("for", TpArr (TpNat, TpUnit)) , 
+TmLam (("i", TpNat), 
+TmIf (TmIsZero (TmVar "i"), TmUnit, TmApp (TmVar "for", TmPred (TmVar "i"))) ), 
+TmApp (TmVar "for", TmSucc (TmSucc (TmZero))) )
+
+let () = check_type rec_prog TpUnit
+
 (* let x=2 in 
   let y=3 in 
-  let add=(λa:Nat. λb:Nat. if iszero a then b else add (pred a) (succ b)) in
-  add (x) (y) *)
-  
-let program = TmFix ( "add" , (
-                TmLam (("a", TpNat) , 
-                  TmLam ( ("b", TpNat), 
-                    TmIf (TmIsZero (TmVar "a"), 
-                          TmVar "b", 
-                          TmApp (TmApp (TmVar "add", TmPred (TmVar "a")), TmVar "b"))))
-              ), TmApp ( TmApp (TmVar "add",  TmSucc (TmSucc (TmZero))), TmSucc (TmSucc (TmSucc (TmZero)))))
+  let add=(λp:(Nat, Nat) if iszero p.fst then p.snd else add (pred p.fst) (succ p.snd)) in
+  add ( x, y) *)
 
+  let program = TmFix ( ("add", TpArr ( TpPair(TpNat,TpNat), TpNat)) , 
+  TmLam ( ("pair", TpPair(TpNat,TpNat) ),
+                  TmIf (TmIsZero (TmFst (TmVar "pair")), 
+                  TmSnd (TmVar "pair"), 
+                  TmApp (TmVar "add", (TmPair (TmPred (TmFst (TmVar "pair")), TmSucc (TmSnd (TmVar "pair")))) ))
+                  ), TmApp (TmVar "add",  TmPair ((TmSucc (TmSucc (TmZero))), (TmSucc (TmSucc (TmSucc (TmZero)))))))
+                  
 
-let () = check_type program TpNat
+  let () = check_type program TpNat
+                  
+              
