@@ -26,6 +26,7 @@ type term =
   (* L-calc *)
   | TmLam of (var_name * tp) * term (*THINK: maybe don't need type in λ (x:T) . t*)
   | TmApp of term * term
+  | TmFix of (var_name * tp)  * term * term 
   (* Pairs *)
   | TmPair of term * term 
   | TmFst of term 
@@ -34,6 +35,7 @@ type term =
   | TmIf of term * term * term
   (*pattern matching term*)
   | TmMatch of term * (pattern * term) list
+  | TmTypedef of (type_name * tp) * term (* define type X = T in t1 *)
   and pattern =
     | PVar of var_name 
     | PUnit
@@ -148,6 +150,14 @@ let rec generateconstraints (ctx : context) (tm : term) : tp * constr =
                                                   let c_match = [(e_type, rs)] in  (* All branches must return same type *)
                                                   c_pat @ c_e @ c_match @ process_cases rest ctx constraints in
                                                   let constraints = process_cases patterns  ctx [] in (rs, ct @ constraints)
+| TmFix((x, typ), t1, t2) -> 
+                             let ctx' = (x, typ) :: (remove_binding x ctx) in
+                             let (t1_type, c1) = generateconstraints ctx' t1 in
+                             let c_fix = [(t1_type, typ)] in
+                             let (t2_type, c2) = generateconstraints ctx' t2 in (t2_type, c1 @ c_fix @ c2)
+| TmTypedef _ -> | TmTypedef ((typ_name, typ) , t) ->
+  let (t_typ ,c) = generateconstraints ctx t in 
+  ( t_typ , ((TpVar typ_name, typ)::c ))
 
 
   (* construction of type substitutions satisfying the constraints *)
