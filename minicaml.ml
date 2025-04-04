@@ -38,7 +38,9 @@ type term =
     | PVar of var_name 
     | PUnit
     | PBool of bool
-    | PNat of int
+    | PZero
+    | PSucc of pattern
+    | PPred of pattern
     | PPair of pattern * pattern
     (*| PDef of *)
 
@@ -86,16 +88,18 @@ let remove_binding (x : var_name) (ctx : context) : context =
   List.filter (fun (y, _) -> y <> x) ctx
 
 
-  let rec generate_pattern_constraints ctx pat =
-    match pat with
-    | PVar x -> ([(x, TpVar x)], [], TpVar x)
-    | PUnit -> ([], [], TpUnit)
-    | PBool _ -> ([], [], TpBool)
-    | PNat _ -> ([], [], TpNat)
-    | PPair (p1, p2) -> 
+let rec generate_pattern_constraints ctx pat =
+  match pat with
+  | PVar x -> ([(x, TpVar x)], [], TpVar x)
+  | PUnit -> ([], [], TpUnit)
+  | PBool _ -> ([], [], TpBool)
+  | PZero -> ([], [], TpNat) 
+  | PSucc n  | PPred n -> ([], [], TpNat) 
+  | PPair (p1, p2) -> 
         let (ctx1, c1, t1) = generate_pattern_constraints ctx p1 in
         let (ctx2, c2, t2) = generate_pattern_constraints ctx p2 in
         (ctx1 @ ctx2, c1 @ c2, TpPair (t1, t2))
+  (*Maybe missing cases*)      
 
 
 let rec generateconstraints (ctx : context) (tm : term) : tp * constr =
@@ -183,16 +187,18 @@ and occurs (x:type_name) (t:tp) : bool =
     | TpPair (t1, t2) -> TpPair (replace x t t1, replace x t t2)
     | _ -> t'
   
-    let check_type (program:term) (intended_type:tp) : unit = 
+  let check_type (program:term) (intended_type:tp) : unit = 
     let (inferred_type, constraints) = generateconstraints [] program in
     let inferred_subs = unify constraints in
     let result_type = List.fold_left (fun t (x, t) -> replace x t t) inferred_type inferred_subs in
     if (result_type == intended_type) then 
       print_endline ("Type check successful: " ^ (tp_to_str intended_type) )
     else
-      print_endline ("Type check failed: expected " ^ (tp_to_str intended_type) ^ " but got " ^ (tp_to_str result_type))
+      print_endline ("Type check failed: expected " ^ (tp_to_str intended_type) ^ " but got " ^ (tp_to_str result_type)) 
+  
   
 
+  
 
 (* pretty printing functions *)
   let unify_print (constraints:constr) : unit =
