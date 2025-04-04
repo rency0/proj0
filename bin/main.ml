@@ -122,7 +122,7 @@ let rec unify (constraints:constr) : sigma =
   | [] -> []
   | (s, t) :: rest ->
       if s = t then unify rest
-      else (print_endline (tp_to_str s ^ " = " ^ tp_to_str t);  match (s, t) with
+      else (match (s, t) with
         | (TpArr (s1, s2), TpArr (t1, t2)) -> unify ((s1, t1) :: (s2, t2) :: rest)
         | (TpPair (s1, s2), TpPair (t1, t2)) -> unify ((s1, t1) :: (s2, t2) :: rest)
         | (TpDef (x, s), t) -> unify ((TpVar x, s) :: (TpVar x , t) :: rest )
@@ -147,20 +147,13 @@ and subst ((x:type_name), (t:tp)) (constraints:constr) : constr =
   (* [X/T] T' *) (* REF: tb section 22.1.1 *)
   and replace (x:type_name) (t:tp) (t':tp) : tp  =
   match t' with
-  | TpVar y -> if y = x then t else t'  (* THINK ?? *)
+  | TpVar y -> if y = x then t else t' 
   | TpDef (y, t1) -> if y = x then t else TpDef (y, replace x t t1) (* THINK (name, List.map (replace x t) t1)*)
   | TpArr (t1, t2) -> TpArr (replace x t t1, replace x t t2)
   | TpPair (t1, t2) -> TpPair (replace x t t1, replace x t t2)
   | _ -> t'
 
 
-(* pretty printing functions *)
-  let unify_print (constraints:constr) : unit =
-    print_endline "Constraints:";
-    print_constraints (constraints); 
-    print_endline "\nUnification Result:";
-    print_sigma (unify constraints)
-(* -------------------------- *)
 
 let check_type (program:term) (intended_type:tp) : unit = 
   let (inferred_type, constraints) = generateconstraints [] program in
@@ -174,6 +167,7 @@ let check_type (program:term) (intended_type:tp) : unit =
 (* Testing *)
 
 
+(* 
 (* ---- succsesful programs ----  *)
 (* inc=λx.(s x) ; p=(T, 0) ; if (p.fst) then (inc p.snd) else (inc (inc p.snd))*)
 let program =   
@@ -188,15 +182,13 @@ let program =
 let () = check_type program (TpNat)
 
 (* -------------------------  *)
-(* 
 (* x=(0 , 1) ; y=(T, F) ; if (x.fst == 0) then y.fst else y.snd*)
 let program = TmLet ("x", TmPair (TmZero, TmSucc (TmZero)) , 
-              TmLet("y" , TmPair(TmTrue, TmFalse), 
-              TmIf (TmIsZero (TmFst (TmVar "x")), TmFst (TmVar "y"), TmSnd (TmVar "y"))))
+TmLet("y" , TmPair(TmTrue, TmFalse), 
+TmIf (TmIsZero (TmFst (TmVar "x")), TmFst (TmVar "y"), TmSnd (TmVar "y"))))
 
-let (final_type, constraints) =  (generateconstraints [] program)
-let () = unify_print constraints
-
+let () = check_type program (TpBool)
+*)
 (* -------------------------  *)
 
 
@@ -206,8 +198,7 @@ let program =
   TmLet ("p", TmPair (TmVar "x", TmVar "x"), 
   TmLam (("y", TpPair (TpVar("A"),TpVar("A"))), 
   TmIf (TmIsZero (TmFst (TmVar "y")), TmSnd (TmVar "y"), TmZero))))
-let (final_type, constraints) =  (generateconstraints [] program)
-let () = unify_print constraints
 
-
-*) 
+  
+let () = check_type program (TpNat)
+(* -------------------------  *)

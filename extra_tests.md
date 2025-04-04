@@ -86,3 +86,48 @@ let (final_type, constraints) =  (generateconstraints [] program)
 let () = unify_print constraints
 
 ```
+
+
+# Pretty printing constraint to unification 
+```ocaml 
+(* pretty printing functions *)
+  let unify_print (constraints:constr) : unit =
+    print_endline "Constraints:";
+    print_constraints (constraints); 
+    print_endline "\nUnification Result:";
+    print_sigma (unify constraints)
+(* -------------------------- *)
+```
+
+# TypeCheck program 
+
+(* inc=λx.(s x) ; p=(T, 0) ; if (p.fst) then (inc p.snd) else (inc (inc p.snd))*)
+let program =   
+  TmLet ("inc",
+    TmLam (("x", TpNat), TmSucc (TmVar "x")),
+  TmLet ("p",
+    TmPair (TmTrue, TmZero),
+  TmIf (TmFst (TmVar "p"),
+    TmApp (TmVar "inc", TmSnd (TmVar "p")),
+    TmApp (TmVar "inc", TmApp( TmVar "inc", TmSnd (TmVar "p"))))))
+
+let () = check_type program (TpNat)
+(* -------------------------  *)
+
+(* x=(0 , 1) ; y=(T, F) ; if (x.fst == 0) then y.fst else y.snd*)
+let program = TmLet ("x", TmPair (TmZero, TmSucc (TmZero)) , 
+TmLet("y" , TmPair(TmTrue, TmFalse), 
+TmIf (TmIsZero (TmFst (TmVar "x")), TmFst (TmVar "y"), TmSnd (TmVar "y"))))
+
+let () = check_type program (TpBool)
+(* -------------------------  *)
+
+(* x=0 ; p=(x, x) ; lambda y : (A, A) = if (y.fst iszero) then (y.snd) else 0 *)
+let program = 
+  TmLet ("x", TmZero, 
+  TmLet ("p", TmPair (TmVar "x", TmVar "x"), 
+  TmLam (("y", TpPair (TpVar("A"),TpVar("A"))), 
+  TmIf (TmIsZero (TmFst (TmVar "y")), TmSnd (TmVar "y"), TmZero))))
+  
+let () = check_type program (TpNat)
+(* -------------------------  *)
