@@ -92,6 +92,9 @@ let rec generateconstraints (ctx : context) (tm : term) : tp * constr =
   | TmPred t1 -> let (typ, c) = generateconstraints ctx t1 in (TpNat, c @ [(typ, TpNat)])
   | TmIsZero t1 -> let (typ, c) = generateconstraints ctx t1 in(TpBool, c @ [(typ, TpNat)]) (* enforce t1:TpNat and the result is a bool*)
   | TmLam((x, typ), t1) -> let (t1_type, c) = generateconstraints ((x, typ) :: ctx)  t1 in (TpArr(typ, t1_type), c) (* THINK : do we need to remove x from the og ctx?*)
+  | TmTypedef ((typ_name, typ) , t) ->
+    let (t_typ ,c) = generateconstraints ctx t in 
+    ( t_typ , ((TpVar typ_name, typ)::c )) 
   | TmApp(t1, t2) -> let (t1_type, c1) = generateconstraints ctx t1 in
                       let (t2_type, c2) = generateconstraints ctx t2 in
                       let f = TpVar ("'" ^ term_to_str(t1) ^ "'_x_app") in  
@@ -122,8 +125,9 @@ let rec generateconstraints (ctx : context) (tm : term) : tp * constr =
      let c_fix = [(t1_type, typ)] in
      let (t2_type, c2) = generateconstraints ctx' t2 in
      (t2_type, c1 @ c_fix @ c2)
-  | TmTypedef _ -> failwith "todo"
-  
+
+
+
   (* construction of type substitutions satisfying the constraints *)
 let rec unify (constraints:constr) : sigma =
   match constraints with
@@ -168,7 +172,7 @@ let check_type (program:term) (intended_type:tp) : unit =
   let (inferred_type, constraints) = generateconstraints [] program in
   let inferred_subs = unify constraints in
   let result_type = List.fold_left (fun t (x, t) -> replace x t t) inferred_type inferred_subs in
-  if (result_type == intended_type) then 
+  if ((tp_to_str result_type) == (tp_to_str intended_type)) then 
     print_endline ("Type check successful: " ^ (tp_to_str intended_type) )
   else
     print_endline ("Type check failed: expected " ^ (tp_to_str intended_type) ^ " but got " ^ (tp_to_str result_type))
@@ -179,11 +183,34 @@ let check_type (program:term) (intended_type:tp) : unit =
 
 (* ---- succsesful programs ----  *)
 
-(* *)
+let t, _ = generateconstraints []  (TmLam (("p", TpPair (TpNat, TpNat)),  TmTrue ))
+let () = print_endline ("\n\n>>" ^ (tp_to_str t) ^ "\n\n")
 let prog = TmTypedef (("natPair", TpPair (TpNat, TpNat)), 
-    TmLam (("p", TpArr (TpVar "natPair", TpUnit) ),  TmUnit))
+    TmLam (("p", TpVar "natPair"),  TmTrue ))
+
+
+let t, c =  generateconstraints [] prog 
+let () = print_constraints c 
+let () = print_endline "\n\n"
+let () = check_type prog  (TpArr ( TpPair (TpNat, TpNat), TpBool) )
+(* 
+let prog = TmTypedef (("natPair", TpPair (TpNat, TpNat)), 
+TmLet ("fst", TmLam (("p", TpVar "natPair") , TmFst (TmVar "p")), 
+TmApp( TmVar "fst", TmPair (TmZero, TmZero)) ))
+
+
+
+let () = check_type prog  (TpNat)
+*)
+
+
+(* l p:()
+let prog =    TmLam (("p", TpPair (TpNat, TpNat)),  TmUnit)
+let () = check_type prog  (TpArr ( TpPair (TpNat, TpNat), TpUnit) )
+*)
 
 (* for(i) = if (iszero i) then Unit else for(pred i)*)
+(* 
 let rec_prog = TmFix ( ("for", TpArr (TpNat, TpUnit)) , 
 TmLam (("i", TpNat), 
 TmIf (TmIsZero (TmVar "i"), TmUnit, TmApp (TmVar "for", TmPred (TmVar "i"))) ), 
@@ -195,15 +222,16 @@ let () = check_type rec_prog TpUnit
   let y=3 in 
   let add=(λp:(Nat, Nat) if iszero p.fst then p.snd else add (pred p.fst) (succ p.snd)) in
   add ( x, y) *)
-
+  
   let program = TmFix ( ("add", TpArr ( TpPair(TpNat,TpNat), TpNat)) , 
   TmLam ( ("pair", TpPair(TpNat,TpNat) ),
-                  TmIf (TmIsZero (TmFst (TmVar "pair")), 
+  TmIf (TmIsZero (TmFst (TmVar "pair")), 
                   TmSnd (TmVar "pair"), 
                   TmApp (TmVar "add", (TmPair (TmPred (TmFst (TmVar "pair")), TmSucc (TmSnd (TmVar "pair")))) ))
                   ), TmApp (TmVar "add",  TmPair ((TmSucc (TmSucc (TmZero))), (TmSucc (TmSucc (TmSucc (TmZero)))))))
                   
 
-  let () = check_type program TpNat
+                  let () = check_type program TpNat
                   
-              
+                  
+                  *)
