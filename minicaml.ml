@@ -34,9 +34,9 @@ type term =
   (* If then else *)
   | TmIf of term * term * term
   (*pattern matching term*)
-  | TmMatch of term * (pattern * term) list
+  | TmMatch of term * (term * term) list
   | TmTypedef of (type_name * tp) * term (* define type X = T in t1 *)
-  and pattern =
+  (*and pattern =
     | PVar of var_name 
     | PUnit
     | PBool of bool
@@ -44,8 +44,7 @@ type term =
     | PSucc of pattern
     | PPred of pattern
     | PPair of pattern * pattern
-    (*| PDef of *)
-
+    (*| PDef of *)*)
 
 type context = (var_name * tp) list
 type sigma  = (type_name * tp) list
@@ -92,16 +91,17 @@ let remove_binding (x : var_name) (ctx : context) : context =
 
 let rec generate_pattern_constraints ctx pat =
   match pat with
-  | PVar x -> ([(x, TpVar x)], [], TpVar x)
-  | PUnit -> ([], [], TpUnit)
-  | PBool _ -> ([], [], TpBool)
-  | PZero -> ([], [], TpNat) 
-  | PSucc n  | PPred n -> ([], [], TpNat) 
-  | PPair (p1, p2) -> 
+  | TmVar x -> ([(x, TpVar x)], [], TpVar x)
+  | TmUnit -> ([], [], TpUnit)
+  | TmTrue | TmFalse -> ([], [], TpBool)
+  | TmZero -> ([], [], TpNat) 
+  | TmSucc n  | TmPred n -> ([], [], TpNat) 
+  | TmPair (p1, p2) -> 
         let (ctx1, c1, t1) = generate_pattern_constraints ctx p1 in
         let (ctx2, c2, t2) = generate_pattern_constraints ctx p2 in
         (ctx1 @ ctx2, c1 @ c2, TpPair (t1, t2))
-  (*Maybe missing cases*)      
+  (*Maybe missing cases*)     
+  |  _ -> failwith "Cannot match on this term"
 
 
 let rec generateconstraints (ctx : context) (tm : term) : tp * constr =
@@ -155,7 +155,7 @@ let rec generateconstraints (ctx : context) (tm : term) : tp * constr =
                              let (t1_type, c1) = generateconstraints ctx' t1 in
                              let c_fix = [(t1_type, typ)] in
                              let (t2_type, c2) = generateconstraints ctx' t2 in (t2_type, c1 @ c_fix @ c2)
-| TmTypedef _ -> | TmTypedef ((typ_name, typ) , t) ->
+| TmTypedef ((typ_name, typ) , t) ->
   let (t_typ ,c) = generateconstraints ctx t in 
   ( t_typ , ((TpVar typ_name, typ)::c ))
 
@@ -217,4 +217,22 @@ and occurs (x:type_name) (t:tp) : bool =
     print_endline "\nUnification Result:";
     print_sigma (unify constraints)
 (* -------------------------- *)
+
+
+
+let test_nested_match =
+  TmLet( "x" , TmPair(TmZero,TmZero),
+    TmMatch (TmVar "x",
+      [ (TmPair (TmZero, TmZero),
+          TmTrue
+        )
+      ]
+    ))
+  
+
+  let () = 
+  print_endline "Running test_match...";
+  check_type test_nested_match TpNat
+
+
 
