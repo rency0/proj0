@@ -133,7 +133,6 @@ let rec unify (constraints:constr) : sigma =
   match constraints with
   | [] -> []
   | (s, t) :: rest -> 
-    print_endline ("\t>> "^ (tp_to_str s) ^ " = " ^ tp_to_str t ^ "\n" ) ; (print_constraints rest); print_endline "" ;
     if s = t then unify rest
     else  (match (s, t) with 
         | (TpArr (s1, s2), TpArr (t1, t2)) -> unify ((s1, t1) :: (s2, t2) :: rest)
@@ -168,11 +167,12 @@ and subst ((x:type_name), (t:tp)) (constraints:constr) : constr =
 
 
 
+
 let check_type (program:term) (intended_type:tp) : unit = 
   let (inferred_type, constraints) = generateconstraints [] program in
   let inferred_subs = unify constraints in
-  let result_type = List.fold_left (fun t (x, t) -> replace x t t) inferred_type inferred_subs in
-  if ((tp_to_str result_type) == (tp_to_str intended_type)) then 
+  let result_type = List.fold_right (fun (x, t_sub) acc -> replace x t_sub acc) inferred_subs inferred_type in
+  if ((tp_to_str result_type) = (tp_to_str intended_type)) then 
     print_endline ("Type check successful: " ^ (tp_to_str intended_type) )
   else
     print_endline ("Type check failed: expected " ^ (tp_to_str intended_type) ^ " but got " ^ (tp_to_str result_type))
@@ -183,55 +183,4 @@ let check_type (program:term) (intended_type:tp) : unit =
 
 (* ---- succsesful programs ----  *)
 
-let t, _ = generateconstraints []  (TmLam (("p", TpPair (TpNat, TpNat)),  TmTrue ))
-let () = print_endline ("\n\n>>" ^ (tp_to_str t) ^ "\n\n")
-let prog = TmTypedef (("natPair", TpPair (TpNat, TpNat)), 
-    TmLam (("p", TpVar "natPair"),  TmTrue ))
 
-
-let t, c =  generateconstraints [] prog 
-let () = print_constraints c 
-let () = print_endline "\n\n"
-let () = check_type prog  (TpArr ( TpPair (TpNat, TpNat), TpBool) )
-(* 
-let prog = TmTypedef (("natPair", TpPair (TpNat, TpNat)), 
-TmLet ("fst", TmLam (("p", TpVar "natPair") , TmFst (TmVar "p")), 
-TmApp( TmVar "fst", TmPair (TmZero, TmZero)) ))
-
-
-
-let () = check_type prog  (TpNat)
-*)
-
-
-(* l p:()
-let prog =    TmLam (("p", TpPair (TpNat, TpNat)),  TmUnit)
-let () = check_type prog  (TpArr ( TpPair (TpNat, TpNat), TpUnit) )
-*)
-
-(* for(i) = if (iszero i) then Unit else for(pred i)*)
-(* 
-let rec_prog = TmFix ( ("for", TpArr (TpNat, TpUnit)) , 
-TmLam (("i", TpNat), 
-TmIf (TmIsZero (TmVar "i"), TmUnit, TmApp (TmVar "for", TmPred (TmVar "i"))) ), 
-TmApp (TmVar "for", TmSucc (TmSucc (TmZero))) )
-
-let () = check_type rec_prog TpUnit
-
-(* let x=2 in 
-  let y=3 in 
-  let add=(λp:(Nat, Nat) if iszero p.fst then p.snd else add (pred p.fst) (succ p.snd)) in
-  add ( x, y) *)
-  
-  let program = TmFix ( ("add", TpArr ( TpPair(TpNat,TpNat), TpNat)) , 
-  TmLam ( ("pair", TpPair(TpNat,TpNat) ),
-  TmIf (TmIsZero (TmFst (TmVar "pair")), 
-                  TmSnd (TmVar "pair"), 
-                  TmApp (TmVar "add", (TmPair (TmPred (TmFst (TmVar "pair")), TmSucc (TmSnd (TmVar "pair")))) ))
-                  ), TmApp (TmVar "add",  TmPair ((TmSucc (TmSucc (TmZero))), (TmSucc (TmSucc (TmSucc (TmZero)))))))
-                  
-
-                  let () = check_type program TpNat
-                  
-                  
-                  *)

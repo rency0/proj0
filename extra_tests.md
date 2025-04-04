@@ -125,9 +125,81 @@ let () = check_type program (TpBool)
 (* x=0 ; p=(x, x) ; lambda y : (A, A) = if (y.fst iszero) then (y.snd) else 0 *)
 let program = 
   TmLet ("x", TmZero, 
-  TmLet ("p", TmPair (TmVar "x", TmVar "x"), 
-  TmLam (("y", TpPair (TpVar("A"),TpVar("A"))), 
-  TmIf (TmIsZero (TmFst (TmVar "y")), TmSnd (TmVar "y"), TmZero))))
+  TmLet ("p", TmPair (TmVar "x", TmVar "x"),
+  TmApp ((
+    TmLam (("y", TpPair (TpVar("A"),TpVar("A"))), 
+    TmIf (TmIsZero (TmFst (TmVar "y")), TmSnd (TmVar "y"), TmZero))), 
+    TmVar "p")))
   
 let () = check_type program (TpNat)
+(* -------------------------  *)
+
+
+# Typdef testing 
+```ocml
+let prog = TmTypedef (("natPair", TpPair (TpNat, TpNat)), 
+    TmLam (("p", TpVar "natPair"),  TmTrue ))
+  
+let () = check_type prog  (TpArr ( TpPair (TpNat, TpNat), TpBool) )
+
+
+let prog = TmTypedef (("natPair", TpPair (TpNat, TpNat)), 
+TmLet ("fst", TmLam (("p", TpVar "natPair") , TmFst (TmVar "p")), 
+TmApp( TmVar "fst", TmPair (TmZero, TmZero)) ))
+
+let () = check_type prog  (TpNat)
+
+```
+
+# Rec testing 
+```ocaml 
+
+
+
+(* for(i) = if (iszero i) then Unit else for(pred i)*)
+
+let rec_prog = TmFix ( ("for", TpArr (TpNat, TpUnit)) , 
+TmLam (("i", TpNat), 
+TmIf (TmIsZero (TmVar "i"), TmUnit, TmApp (TmVar "for", TmPred (TmVar "i"))) ), 
+TmApp (TmVar "for", TmSucc (TmSucc (TmZero))) )
+
+let () = check_type rec_prog TpUnit
+
+(* let x=2 in 
+  let y=3 in 
+  let add=(λp:(Nat, Nat) if iszero p.fst then p.snd else add (pred p.fst) (succ p.snd)) in
+  add ( x, y) *)
+  
+  let program = TmFix ( ("add", TpArr ( TpPair(TpNat,TpNat), TpNat)) , 
+  TmLam ( ("pair", TpPair(TpNat,TpNat) ),
+  TmIf (TmIsZero (TmFst (TmVar "pair")), 
+                  TmSnd (TmVar "pair"), 
+                  TmApp (TmVar "add", (TmPair (TmPred (TmFst (TmVar "pair")), TmSucc (TmSnd (TmVar "pair")))) ))
+                  ), TmApp (TmVar "add",  TmPair ((TmSucc (TmSucc (TmZero))), (TmSucc (TmSucc (TmSucc (TmZero)))))))
+                  
+
+                  let () = check_type program TpNat
+                  
+                  
+                
+```
+
+
+
+# FUTURE TEST 
+
+let program = 
+  TmLet ("x", TmZero, 
+  TmLet ("p", TmPair (TmVar "x", TmVar "x"),
+  TmLet ("nat", (
+    TmApp ((
+      TmLam (("y", TpPair (TpVar("A"),TpVar("A"))), 
+      TmIf (TmIsZero (TmFst (TmVar "y")), TmSnd (TmVar "y"), TmZero))), 
+      TmVar "p")), 
+      TmApp ((
+        TmLam (("y", TpPair (TpVar("A"),TpVar("A"))), 
+        TmIf (TmIsZero (TmFst (TmVar "y")), TmSnd (TmVar "y"), TmZero))), 
+        TmPair(TmFalse, TmTrue))) ))
+  
+let () = check_type program (TpBool)
 (* -------------------------  *)
