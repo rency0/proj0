@@ -9,6 +9,7 @@ type tp =
   | TpDef of type_name * tp  (* define "X" = type *)
   
 
+
 (* TODO: add FIX term *)
 type term = 
   | TmUnit
@@ -31,6 +32,17 @@ type term =
   | TmSnd of term
   (* If then else *)
   | TmIf of term * term * term
+  (*pattern matching term*)
+  | TmMatch of term * (pattern * term) list
+  and pattern =
+    | PVar of var_name 
+    | PUnit
+    | PBool of bool
+    | PZero
+    | PSucc of pattern
+    | PPred of pattern
+    | PPair of pattern * pattern
+    (*| PDef of *)
 
 
 type context = (var_name * tp) list
@@ -75,6 +87,21 @@ let print_sigma (sigma:sigma) : unit =
 let remove_binding (x : var_name) (ctx : context) : context =
   List.filter (fun (y, _) -> y <> x) ctx
 
+
+let rec generate_pattern_constraints ctx pat =
+  match pat with
+  | PVar x -> ([(x, TpVar x)], [], TpVar x)
+  | PUnit -> ([], [], TpUnit)
+  | PBool _ -> ([], [], TpBool)
+  | PZero -> ([], [], TpNat) 
+  | PSucc n  | PPred n -> ([], [], TpNat) 
+  | PPair (p1, p2) -> 
+        let (ctx1, c1, t1) = generate_pattern_constraints ctx p1 in
+        let (ctx2, c2, t2) = generate_pattern_constraints ctx p2 in
+        (ctx1 @ ctx2, c1 @ c2, TpPair (t1, t2))
+  (*Maybe missing cases*)      
+
+
 let rec generateconstraints (ctx : context) (tm : term) : tp * constr =
   match tm with
   | TmVar x ->(match List.assoc_opt x ctx with
@@ -112,7 +139,15 @@ let rec generateconstraints (ctx : context) (tm : term) : tp * constr =
                           (* Condition must be boolean and branches must have the same type *)
                           let c_if = [(cond_type, TpBool); (t1_type, t2_type)] in
                           (t1_type, c_cond @ c1 @ c2 @ c_if)
-
+  | TmMatch (t,patterns) -> let (ty,ct) = generateconstraints ctx t in
+                            let rs = TpVar((term_to_str t) ^"match") in 
+                            let rec process_cases cases ctx constraints = match cases with
+                            | [] -> []
+                            | (pat, e) :: rest -> let (ctx', c_pat, pat_type) = generate_pattern_constraints ctx pat in
+                                                  let (e_type, c_e) = generateconstraints (ctx' @ ctx) e in
+                                                  let c_match = [(e_type, rs)] in  (* All branches must return same type *)
+                                                  c_pat @ c_e @ c_match @ process_cases rest ctx constraints in
+                                                  let constraints = process_cases patterns  ctx [] in (rs, ct @ constraints)
 
 
   (* construction of type substitutions satisfying the constraints *)
@@ -151,6 +186,18 @@ and occurs (x:type_name) (t:tp) : bool =
     | TpArr (t1, t2) -> TpArr (replace x t t1, replace x t t2)
     | TpPair (t1, t2) -> TpPair (replace x t t1, replace x t t2)
     | _ -> t'
+  
+  let check_type (program:term) (intended_type:tp) : unit = 
+    let (inferred_type, constraints) = generateconstraints [] program in
+    let inferred_subs = unify constraints in
+    let result_type = List.fold_left (fun t (x, t) -> replace x t t) inferred_type inferred_subs in
+    if (result_type == intended_type) then 
+      print_endline ("Type check successful: " ^ (tp_to_str intended_type) )
+    else
+      print_endline ("Type check failed: expected " ^ (tp_to_str intended_type) ^ " but got " ^ (tp_to_str result_type)) 
+  
+  
+
   
 
 (* pretty printing functions *)
