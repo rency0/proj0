@@ -38,7 +38,7 @@ type context = (var_name * tp) list
 type sigma  = (type_name * tp) list
 type constr = (tp * tp) list 
 
-exception UnificationError
+exception UnificationError of string
 
 
 (* Pretty printing functions *)
@@ -80,7 +80,7 @@ let rec generateconstraints (ctx : context) (tm : term) : tp * constr =
   match tm with
   | TmVar x ->(match List.assoc_opt x ctx with
               | Some t -> (t, [])
-              | None -> failwith ("Variable "^ x ^" not found"))
+              | None -> raise (UnificationError ("Variable "^ x ^" not found")))
   | TmUnit ->  (TpUnit, [])
   | TmTrue ->  (TpBool, [])
   | TmFalse -> (TpBool, [])
@@ -129,7 +129,7 @@ let rec unify (constraints:constr) : sigma =
         | (t, TpDef (x, s)) -> unify ((TpVar x, s) :: (TpVar x , t) :: rest )
         | (TpVar x, t) when not (occurs x t) -> (x, t) :: unify (subst (x, t) rest)
         | (t, TpVar x) when not (occurs x t) -> (x, t) :: unify (subst (x, t) rest)
-        | ( _ , _ ) -> failwith "Unification Failed"
+        | ( _ , _ ) -> raise (UnificationError ("Unification failed: " ^ (tp_to_str s) ^ " = " ^ (tp_to_str t)) )
       )
   (* X ∈ FV(T) *)
 and occurs (x:type_name) (t:tp) : bool =
@@ -162,12 +162,19 @@ and subst ((x:type_name), (t:tp)) (constraints:constr) : constr =
     print_sigma (unify constraints)
 (* -------------------------- *)
 
+let check_type (program:term) (intended_type:tp) : unit = 
+  let (inferred_type, constraints) = generateconstraints [] program in
+  let inferred_subs = unify constraints in
+  let result_type = List.fold_left (fun t (x, t) -> replace x t t) inferred_type inferred_subs in
+  if (result_type == intended_type) then 
+    print_endline ("Type check successful: " ^ (tp_to_str intended_type) )
+  else
+    print_endline ("Type check failed: expected " ^ (tp_to_str intended_type) ^ " but got " ^ (tp_to_str result_type))
 
 (* Testing *)
 
-(*
 
-  (* ---- succsesful programs ----  *)
+(* ---- succsesful programs ----  *)
 (* inc=λx.(s x) ; p=(T, 0) ; if (p.fst) then (inc p.snd) else (inc (inc p.snd))*)
 let program =   
   TmLet ("inc",
@@ -177,10 +184,11 @@ let program =
   TmIf (TmFst (TmVar "p"),
     TmApp (TmVar "inc", TmSnd (TmVar "p")),
     TmApp (TmVar "inc", TmApp( TmVar "inc", TmSnd (TmVar "p"))))))
-let (final_type, constraints) =  (generateconstraints [] program)
-let () = unify_print constraints
-(* -------------------------  *)
 
+let () = check_type program (TpNat)
+
+(* -------------------------  *)
+(* 
 (* x=(0 , 1) ; y=(T, F) ; if (x.fst == 0) then y.fst else y.snd*)
 let program = TmLet ("x", TmPair (TmZero, TmSucc (TmZero)) , 
               TmLet("y" , TmPair(TmTrue, TmFalse), 
