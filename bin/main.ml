@@ -32,6 +32,7 @@ type term =
   | TmSnd of term
   (* If then else *)
   | TmIf of term * term * term
+  | TmFix of var_name  * term * term (* let rec x = t1 in t2 *)
 
 
 type context = (var_name * tp) list
@@ -66,6 +67,7 @@ let rec term_to_str (t:term) : string = match t with
   | TmFst t1 -> "fst " ^ (term_to_str t1)
   | TmSnd t1 -> "snd " ^ (term_to_str t1)
   | TmIf (t1, t2, t3) -> "if (" ^ (term_to_str t1) ^ ") then {" ^ (term_to_str t2) ^ "} else {" ^ (term_to_str t3) ^ "}"
+  | TmFix (x, t1, t2) -> "let rec " ^ x ^ " = " ^ (term_to_str t1) ^ " in " ^ (term_to_str t2)
 let print_constraints (constraints:constr) : unit = 
   List.iter (fun (s, t) -> Printf.printf "%s = %s\n" (tp_to_str s) (tp_to_str t)) constraints
 let print_sigma (sigma:sigma) : unit =
@@ -80,7 +82,7 @@ let rec generateconstraints (ctx : context) (tm : term) : tp * constr =
   match tm with
   | TmVar x ->(match List.assoc_opt x ctx with
               | Some t -> (t, [])
-              | None -> raise (UnificationError ("Variable "^ x ^" not found")))
+              | None ->  raise (UnificationError ("Variable "^ x ^" not found")))
   | TmUnit ->  (TpUnit, [])
   | TmTrue ->  (TpBool, [])
   | TmFalse -> (TpBool, [])
@@ -112,9 +114,14 @@ let rec generateconstraints (ctx : context) (tm : term) : tp * constr =
                           let (t2_type, c2) = generateconstraints ctx t2 in
                           (* Condition must be boolean and branches must have the same type *)
                           let c_if = [(cond_type, TpBool); (t1_type, t2_type)] in
-                          (t1_type, c_cond @ c1 @ c2 @ c_if)
-
-
+                          (t1_type, c_cond @ c1 @ c2 @ c_if)                          
+  | TmFix(x, t1, t2) -> 
+          let f = TpVar (x) in  
+          let ctx' = (x, f) :: ctx in  (* Add the recursive function to the context *)
+          let (t1_type, c1) = generateconstraints ctx' t1 in  (* First, generate the type for the function body t1 *)
+          let (t2_type, c2) = generateconstraints ctx' t2 in  (* Then, for the function body t2 *)
+          let c_rec = [(t1_type, TpArr (f, t2_type)); (t2_type, f)] in  (* Enforce the function type to be of the form A -> A *)
+          (t2_type, c1 @ c2 @ c_rec)
 
   (* construction of type substitutions satisfying the constraints *)
 let rec unify (constraints:constr) : sigma =
@@ -167,38 +174,21 @@ let check_type (program:term) (intended_type:tp) : unit =
 (* Testing *)
 
 
-(* 
+
 (* ---- succsesful programs ----  *)
-(* inc=λx.(s x) ; p=(T, 0) ; if (p.fst) then (inc p.snd) else (inc (inc p.snd))*)
-let program =   
-  TmLet ("inc",
-    TmLam (("x", TpNat), TmSucc (TmVar "x")),
-  TmLet ("p",
-    TmPair (TmTrue, TmZero),
-  TmIf (TmFst (TmVar "p"),
-    TmApp (TmVar "inc", TmSnd (TmVar "p")),
-    TmApp (TmVar "inc", TmApp( TmVar "inc", TmSnd (TmVar "p"))))))
 
-let () = check_type program (TpNat)
-
-(* -------------------------  *)
-(* x=(0 , 1) ; y=(T, F) ; if (x.fst == 0) then y.fst else y.snd*)
-let program = TmLet ("x", TmPair (TmZero, TmSucc (TmZero)) , 
-TmLet("y" , TmPair(TmTrue, TmFalse), 
-TmIf (TmIsZero (TmFst (TmVar "x")), TmFst (TmVar "y"), TmSnd (TmVar "y"))))
-
-let () = check_type program (TpBool)
-*)
-(* -------------------------  *)
-
-
-(* x=0 ; p=(x, x) ; lambda y : (A, A) = if (y.fst iszero) then (y.snd) else 0 *)
-let program = 
-  TmLet ("x", TmZero, 
-  TmLet ("p", TmPair (TmVar "x", TmVar "x"), 
-  TmLam (("y", TpPair (TpVar("A"),TpVar("A"))), 
-  TmIf (TmIsZero (TmFst (TmVar "y")), TmSnd (TmVar "y"), TmZero))))
-
+(* let x=2 in 
+  let y=3 in 
+  let add=(λa:Nat. λb:Nat. if iszero a then b else add (pred a) (succ b)) in
+  add (x) (y) *)
   
-let () = check_type program (TpNat)
-(* -------------------------  *)
+let program = TmFix ( "add" , (
+                TmLam (("a", TpNat) , 
+                  TmLam ( ("b", TpNat), 
+                    TmIf (TmIsZero (TmVar "a"), 
+                          TmVar "b", 
+                          TmApp (TmApp (TmVar "add", TmPred (TmVar "a")), TmVar "b"))))
+              ), TmApp ( TmApp (TmVar "add",  TmSucc (TmSucc (TmZero))), TmSucc (TmSucc (TmSucc (TmZero)))))
+
+
+let () = check_type program TpNat
