@@ -8,9 +8,6 @@ type tp =
   | TpVar of type_name  (* type "X" *)
   | TpDef of type_name * tp  (* define "X" = type *)
   
-
-
-(* TODO: add FIX term *)
 type term = 
   | TmUnit
   | TmVar of var_name
@@ -34,17 +31,16 @@ type term =
   (* If then else *)
   | TmIf of term * term * term
   (*pattern matching term*)
-  | TmMatch of term * (term * term) list
+  | TmMatch of term * (pattern* term) list
   | TmTypedef of (type_name * tp) * term (* define type X = T in t1 *)
-  (*and pattern =
+  and pattern =
     | PVar of var_name 
     | PUnit
-    | PBool of bool
+    | PTrue | PFalse
     | PZero
     | PSucc of pattern
     | PPred of pattern
     | PPair of pattern * pattern
-    (*| PDef of *)*)
 
 type context = (var_name * tp) list
 type sigma  = (type_name * tp) list
@@ -91,17 +87,17 @@ let remove_binding (x : var_name) (ctx : context) : context =
 
 let rec generate_pattern_constraints ctx pat =
   match pat with
-  | TmVar x -> ([(x, TpVar x)], [], TpVar x)
-  | TmUnit -> ([], [], TpUnit)
-  | TmTrue | TmFalse -> ([], [], TpBool)
-  | TmZero -> ([], [], TpNat) 
-  | TmSucc n  | TmPred n -> ([], [], TpNat) 
-  | TmPair (p1, p2) -> 
+  | PVar x -> ([(x, TpVar x)], [], TpVar x)
+  | PUnit -> ([], [], TpUnit)
+  | PTrue | PFalse -> ([], [], TpBool)
+  | PZero -> ([], [], TpNat) 
+  | PSucc n  | PPred n ->let (ctx1, c1, t1) = generate_pattern_constraints ctx n in
+                            (ctx1, c1 @ [(t1, TpNat)], TpNat)
+  | PPair (p1, p2) -> 
         let (ctx1, c1, t1) = generate_pattern_constraints ctx p1 in
         let (ctx2, c2, t2) = generate_pattern_constraints ctx p2 in
         (ctx1 @ ctx2, c1 @ c2, TpPair (t1, t2))
-  (*Maybe missing cases*)     
-  |  _ -> failwith "Cannot match on this term"
+
 
 
 let rec generateconstraints (ctx : context) (tm : term) : tp * constr =
@@ -220,19 +216,21 @@ and occurs (x:type_name) (t:tp) : bool =
 
 
 
-let test_nested_match =
-  TmLet( "x" , TmPair(TmZero,TmZero),
-    TmMatch (TmVar "x",
-      [ (TmPair (TmZero, TmZero),
-          TmTrue
-        )
-      ]
-    ))
+let test_term = 
+  TmMatch (
+    TmPair (TmSucc TmZero, TmTrue), (* term we are matching on *)
+    [
+      (PPair (PVar "x", PFalse), TmFalse);                 (* doesn't match *)
+      (PPair (PSucc PZero, PTrue), TmTrue);                (* matches *)             
+    ]
+  )
+
   
 
   let () = 
   print_endline "Running test_match...";
-  check_type test_nested_match TpNat
+  check_type test_term TpBool
 
+ 
 
-
+  
