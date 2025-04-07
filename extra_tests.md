@@ -136,7 +136,7 @@ let () = check_type program (TpNat)
 
 
 # Typdef testing 
-```ocml
+```ocaml
 let prog = TmTypedef (("natPair", TpPair (TpNat, TpNat)), 
     TmLam (("p", TpVar "natPair"),  TmTrue ))
   
@@ -187,7 +187,7 @@ let () = check_type rec_prog TpUnit
 
 
 # FUTURE TEST 
-
+``` ocaml 
 let program = 
   TmLet ("x", TmZero, 
   TmLet ("p", TmPair (TmVar "x", TmVar "x"),
@@ -202,4 +202,6 @@ let program =
         TmPair(TmFalse, TmTrue))) ))
   
 let () = check_type program (TpBool)
+
+```
 (* -------------------------  *)

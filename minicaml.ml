@@ -46,7 +46,7 @@ type context = (var_name * tp) list
 type sigma  = (type_name * tp) list
 type constr = (tp * tp) list
 
-exception UnificationError
+exception UnificationError of string
 
 
 (* Pretty printing functions *)
@@ -74,6 +74,20 @@ let rec term_to_str (t:term) : string = match t with
   | TmFst t1 -> "fst " ^ (term_to_str t1)
   | TmSnd t1 -> "snd " ^ (term_to_str t1)
   | TmIf (t1, t2, t3) -> "if (" ^ (term_to_str t1) ^ ") then {" ^ (term_to_str t2) ^ "} else {" ^ (term_to_str t3) ^ "}"
+  | TmFix ((x, tp) , t1, t2) -> "let rec " ^ x ^ ":" ^ (tp_to_str tp) ^ " = " ^ (term_to_str t1) ^ " in " ^ (term_to_str t2)
+  | TmTypedef ((x, tp), t) -> "let type " ^ x ^ " := " ^ (tp_to_str tp) ^ " in " ^ (term_to_str t) 
+  | TmMatch (t, patterns) -> 
+    let patterns_str = List.fold_right (fun (p, e) acc -> "\t| " ^ (pattern_to_str p) ^ " -> " ^ (term_to_str e) ^ "\n" ^ acc) patterns "" in
+    "match " ^ (term_to_str t) ^ " with \n" ^ patterns_str
+  and pattern_to_str (p:pattern) : string = match p with
+    | PVar x -> x
+    | PUnit -> "unit"
+    | PTrue -> "true"
+    | PFalse -> "false"
+    | PZero -> "zero"
+    | PSucc p1 -> "succ (" ^ (pattern_to_str p1) ^ ")"
+    | PPred p1 -> "pred (" ^ (pattern_to_str p1) ^ ")"
+    | PPair (p1, p2) -> "<" ^ (pattern_to_str p1) ^ ", " ^ (pattern_to_str p2) ^ ">"
 let print_constraints (constraints:constr) : unit = 
   List.iter (fun (s, t) -> Printf.printf "%s = %s\n" (tp_to_str s) (tp_to_str t)) constraints
 let print_sigma (sigma:sigma) : unit =
@@ -104,7 +118,7 @@ let rec generateconstraints (ctx : context) (tm : term) : tp * constr =
   match tm with
   | TmVar x ->(match List.assoc_opt x ctx with
               | Some t -> (t, [])
-              | None -> failwith ("Variable "^ x ^" not found"))
+              | None ->  raise (UnificationError ("Variable "^ x ^" not found")))
   | TmUnit ->  (TpUnit, [])
   | TmTrue ->  (TpBool, [])
   | TmFalse -> (TpBool, [])
@@ -162,14 +176,14 @@ match constraints with
   | [] -> []
   | (s, t) :: rest ->
       if s = t then unify rest
-      else (print_endline (tp_to_str s ^ " = " ^ tp_to_str t);  match (s, t) with
+    else  (match (s, t) with 
         | (TpArr (s1, s2), TpArr (t1, t2)) -> unify ((s1, t1) :: (s2, t2) :: rest)
         | (TpPair (s1, s2), TpPair (t1, t2)) -> unify ((s1, t1) :: (s2, t2) :: rest)
         | (TpDef (x, s), t) -> unify ((TpVar x, s) :: (TpVar x , t) :: rest )
         | (t, TpDef (x, s)) -> unify ((TpVar x, s) :: (TpVar x , t) :: rest )
         | (TpVar x, t) when not (occurs x t) -> (x, t) :: unify (subst (x, t) rest)
         | (t, TpVar x) when not (occurs x t) -> (x, t) :: unify (subst (x, t) rest)
-        | ( _ , _ ) -> failwith "Unification Failed"
+        | ( _ , _ ) -> raise (UnificationError ("Unification failed: " ^ (tp_to_str s) ^ " = " ^ (tp_to_str t)) )
       )
   (* X ∈ FV(T) *)
 and occurs (x:type_name) (t:tp) : bool =
@@ -187,17 +201,20 @@ and occurs (x:type_name) (t:tp) : bool =
     (* [X/T] T' *) (* REF: tb section 22.1.1 *)
     and replace (x:type_name) (t:tp) (t':tp) : tp  =
     match t' with
-  | TpVar y -> if y = x then t else t'  (* THINK ?? *)
+  | TpVar y -> if y = x then t else t' 
   | TpDef (y, t1) -> if y = x then t else TpDef (y, replace x t t1) (* THINK (name, List.map (replace x t) t1)*)
     | TpArr (t1, t2) -> TpArr (replace x t t1, replace x t t2)
     | TpPair (t1, t2) -> TpPair (replace x t t1, replace x t t2)
     | _ -> t'
   
+
+
+
   let check_type (program:term) (intended_type:tp) : unit = 
     let (inferred_type, constraints) = generateconstraints [] program in
     let inferred_subs = unify constraints in
-    let result_type = List.fold_left (fun t (x, t) -> replace x t t) inferred_type inferred_subs in
-    if (result_type == intended_type) then 
+  let result_type = List.fold_right (fun (x, t_sub) acc -> replace x t_sub acc) inferred_subs inferred_type in
+  if ((tp_to_str result_type) = (tp_to_str intended_type)) then 
       print_endline ("Type check successful: " ^ (tp_to_str intended_type) )
     else
       print_endline ("Type check failed: expected " ^ (tp_to_str intended_type) ^ " but got " ^ (tp_to_str result_type)) 
@@ -205,17 +222,6 @@ and occurs (x:type_name) (t:tp) : bool =
   
 
   
-
-(* pretty printing functions *)
-  let unify_print (constraints:constr) : unit =
-    print_endline "Constraints:";
-    print_constraints (constraints); 
-    print_endline "\nUnification Result:";
-    print_sigma (unify constraints)
-(* -------------------------- *)
-
-
-
 let test_term = 
   TmMatch (
     TmPair (TmSucc TmZero, TmTrue), (* term we are matching on *)
@@ -231,6 +237,5 @@ let test_term =
   print_endline "Running test_match...";
   check_type test_term TpBool
 
- 
-
-  
+let () = 
+  print_endline (term_to_str test_term);
