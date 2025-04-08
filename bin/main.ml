@@ -120,7 +120,7 @@ let remove_binding (x : type_name) (ctx : context) : context =
 let rec replace (x:type_name) (t:tp) (t':tp) : tp  =
 match t' with
 | TpVar y -> if y = x then t else t' 
-| TpDef (y, t1) -> if y = x then t else TpDef (y, replace x t t1) (* THINK (name, List.map (replace x t) t1)*)
+| TpDef (y, t1) -> if y = x then t else TpDef (y, replace x t t1) 
 | TpArr (t1, t2) -> TpArr (replace x t t1, replace x t t2)
 | TpPair (t1, t2) -> TpPair (replace x t t1, replace x t t2)
 | _ -> t'
@@ -208,10 +208,18 @@ let rec generateconstraints (ctx : context) (tm : term) : tp * constr =
     let generalized_vars = List.filter (fun x -> not (List.mem x ctx_ftv)) t_ftv in
     Forall(generalized_vars, t)
   
-  and instantiate (Forall(vars, t)) =
-      let subst_list = List.map (fun var -> (var, TpVar (var ^ "'"))) vars in
-      List.fold_left (fun t (x, t_sub) -> replace x t_sub t) t subst_list
-  
+  and instantiate (Forall(vars, t)) = 
+    print_endline (">>> \n" ^ (tp_to_str t));
+    print_endline (">>> \t" ^ (String.concat ", " vars) ); 
+    let fresh_sufix = fresh_count () in 
+    let subst_list = List.map (fun var -> (var ^ fresh_sufix, TpVar (var ^ fresh_sufix))) vars in
+    print_endline (">>> \t" ^ (String.concat ", " (List.map (fun (x, _) -> x) subst_list)) );
+    let result = List.fold_left (fun t (x, t_sub) -> replace x t_sub t) t subst_list in 
+    print_endline (">>>>>> " ^ (tp_to_str result) ^ "\n");
+    result
+  and fresh_count  = 
+    let count = ref 0 in
+    fun () -> let c = !count in count := c + 1; string_of_int c
 
   (* construction of type substitutions satisfying the constraints *)
 let rec unify (constraints:constr) : sigma =
@@ -219,7 +227,7 @@ let rec unify (constraints:constr) : sigma =
   | [] -> []
   | (s, t) :: rest -> 
     if s = t then unify rest
-    else  (match (s, t) with 
+    else (print_endline (tp_to_str s ^ " = " ^ tp_to_str t);  (match (s, t) with 
         | (TpArr (s1, s2), TpArr (t1, t2)) -> unify ((s1, t1) :: (s2, t2) :: rest)
         | (TpPair (s1, s2), TpPair (t1, t2)) -> unify ((s1, t1) :: (s2, t2) :: rest)
         | (TpDef (x, s), t) -> unify ((TpVar x, s) :: (TpVar x , t) :: rest )
@@ -227,7 +235,7 @@ let rec unify (constraints:constr) : sigma =
         | (TpVar x, t) when not (occurs x t) -> (x, t) :: unify (subst (x, t) rest)
         | (t, TpVar x) when not (occurs x t) -> (x, t) :: unify (subst (x, t) rest)
         | ( _ , _ ) -> raise (UnificationError ("Unification failed: " ^ (tp_to_str s) ^ " = " ^ (tp_to_str t)) )
-      )
+      ))
   (* X ∈ FV(T) *)
 and occurs (x:type_name) (t:tp) : bool =
   match t with
@@ -253,18 +261,35 @@ let check_type (program:term) (intended_type:tp) : unit =
     print_endline ("Type check failed: expected " ^ (tp_to_str intended_type) ^ " but got " ^ (tp_to_str result_type))
 
 
+    let unify_print (constraints:constr) : unit =
+      print_endline "Constraints:";
+      print_constraints (constraints); 
+      print_endline "\nUnification Result:";
+      print_sigma (unify constraints)
 
-(* x=0 ; p=(x, x) ; lambda y : (A, A) = if (y.fst iszero) then (y.snd) else 0 *)
+
+(* x=0 ; p=(x, x) ; app [lambda y : (A, A) = if (y.fst iszero) then (y.snd) else 0] p *)
 let program = 
-  TmLet ("x", TmZero, 
-  TmLet ("p", TmPair (TmVar "x", TmVar "x"), 
-  TmLam (("y", TpPair (TpVar("A"),TpVar("A"))), 
-  TmIf (TmIsZero (TmFst (TmVar "y")), TmSnd (TmVar "y"), TmZero))))
-let () = check_type program TpNat;;
+  TmLet ("id", TmLam (("x", TpVar "A"), TmVar "x"), 
+  TmPair (TmApp (TmVar "id", TmZero), TmApp (TmVar "id", TmTrue)))
 
-
+let program = 
+    TmLet ("id",  TmLam (("x", TpVar "X"), TmVar "x"), 
+    TmLet ("fun", TmLam (("g", TpVar "A"), TmPair (TmApp (TmVar "g", TmZero), TmApp (TmVar "g", TmTrue))), 
+    TmApp (TmVar "fun", TmVar "id")))
   
-  (* =======================================================
+(*
+let () = check_type program TpNat;;
+let()= print_endline "----------------\n";;
+
+*) 
+
+let (final_type, constraints) =  (generateconstraints [] program)
+let () = unify_print constraints
+
+
+
+(* =======================================================
   let x = ref 0 
   let print_count () = 
     print_endline "----------------"; 
@@ -272,34 +297,9 @@ let () = check_type program TpNat;;
     print_newline () ;
     x := !x +1
 
-
-
-(* x=0 ; p=(x, x) ; lambda y : (A, A) = if (y.fst iszero) then (y.snd) else 0 *)
-let program = 
-  TmLet ("x", TmZero, 
-  TmLet ("p", TmPair (TmVar "x", TmVar "x"), 
-  TmLam (("y", TpPair (TpVar("A"),TpVar("A"))), 
-  TmIf (TmIsZero (TmFst (TmVar "y")), TmSnd (TmVar "y"), TmZero))))
-let () = print_count(); check_type program TpNat;;
-
-
-
-
-(* ------ *)
-let prog = TmTypedef (("natPair", TpPair (TpNat, TpNat)), 
-TmLet ("fst", TmLam (("p", TpVar "natPair") , TmFst (TmVar "p")), 
-TmApp( TmVar "fst", TmPair (TmZero, TmZero)) ))
-
-let () = print_count(); check_type prog  (TpNat)
-
-
-
-let () = print_count(); check_type program TpNat
                   
 (* let id = fun x -> x in (id 5, id true) *)
-let program = 
-  TmLet ("id", TmLam (("x", TpVar "A"), TmVar "x"), 
-  TmPair (TmApp (TmVar "id", TmZero), TmApp (TmVar "id", TmTrue)))
+
 let () = print_count(); check_type program (TpPair (TpNat, TpBool))
 
  *)

@@ -80,8 +80,10 @@ let () = unify_print constraints
 let program = 
   TmLet ("x", TmZero, 
   TmLet ("p", TmPair (TmVar "x", TmVar "x"), 
-  TmLam (("y", TpPair (TpVar("A"),TpVar("A"))), 
-  TmIf (TmIsZero (TmFst (TmVar "y")), TmSnd (TmVar "y"), TmZero))))
+  TmApp ( 
+    TmLam (("y", TpPair (TpVar("A"),TpVar("A"))), 
+    TmIf (TmIsZero (TmFst (TmVar "y")), TmSnd (TmVar "y"), TmZero)), 
+  TmVar "p")))
 let (final_type, constraints) =  (generateconstraints [] program)
 let () = unify_print constraints
 
