@@ -205,3 +205,22 @@ let () = check_type program (TpBool)
 
 ```
 (* -------------------------  *)
+
+
+# Matching test 
+```ocaml 
+
+
+let test_term = 
+  TmMatch (
+    TmPair (TmSucc TmZero, TmTrue), (* term we are matching on *)
+    [
+      (PPair (PVar "x", PFalse), TmFalse);                 (* doesn't match *)
+      (PPair (PSucc PZero, PTrue), TmTrue);                (* matches *)             
+    ]
+  )
+
+  let () = 
+  print_endline "Running test_match...";
+  check_type test_term TpBool
+```
