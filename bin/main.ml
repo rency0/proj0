@@ -106,10 +106,8 @@ let rec fv_tp (t:tp) : type_name list =
   | TpVar x -> [x] 
   | TpDef (x, t1) -> x :: (fv_tp t1)
   | _ -> []
-
 let fv_scheme (Forall((vars:type_name list), (t:tp))) : type_name list = 
   List.filter (fun x -> not (List.mem x vars)) (fv_tp t)
-
 let fv_ctx (ctx:context) : type_name list = 
   List.fold_left (fun acc (_, scheme) -> 
     List.fold_left (fun acc x -> 
@@ -144,7 +142,7 @@ let rec generate_pattern_constraints (ctx:context) (pat:pattern) : context * con
         let (ctx2, c2, t2) = generate_pattern_constraints ctx p2 in
         (ctx1 @ ctx2, c1 @ c2, TpPair (t1, t2))
 
-
+(* todo : rm type of lam *)
 
 let rec generateconstraints (ctx : context) (tm : term) : tp * constr =
   match tm with
@@ -158,15 +156,15 @@ let rec generateconstraints (ctx : context) (tm : term) : tp * constr =
   | TmSucc t1 -> let (typ, c) = generateconstraints ctx t1 in (TpNat, c @ [(typ, TpNat)]) (* enforce that t1: TpNat *)
   | TmPred t1 -> let (typ, c) = generateconstraints ctx t1 in (TpNat, c @ [(typ, TpNat)])
   | TmIsZero t1 -> let (typ, c) = generateconstraints ctx t1 in(TpBool, c @ [(typ, TpNat)]) (* enforce t1:TpNat and the result is a bool*)
-  | TmLam((x, typ), t1) -> let (t1_type, c) = generateconstraints ((x, Forall ([x], typ)) :: ctx) t1 in (TpArr(typ, t1_type), c)
+  | TmLam((x, typ), t1) -> let (t1_type, c) = generateconstraints ((x, Forall ([], typ)) :: ctx) t1 in (TpArr(typ, t1_type), c)
   | TmApp(t1, t2) -> let (t1_type, c1) = generateconstraints ctx t1 in
                       let (t2_type, c2) = generateconstraints ctx t2 in
-                      let f = TpVar (term_to_str(t1) ^ "x_app") in  
+                      let f = TpVar (term_to_str(t1) ^ fresh_count() ^"_x_app") in  
                       let c_app = [(t1_type, TpArr(t2_type, f))] in (f, c1 @ c2 @ c_app)
   | TmLet(x, t1, t2) -> 
         let (t1_type, c1) = generateconstraints ctx t1 in
         let f_scheme = generalize ctx t1_type in
-        let f = TpVar x in  
+        let f = TpVar x in
         let ctx' = (x, f_scheme) :: (remove_binding x ctx) in
         let (t2_type, c2) = generateconstraints ctx' t2 in
         let c_let = [(f, t1_type)] in
@@ -174,10 +172,10 @@ let rec generateconstraints (ctx : context) (tm : term) : tp * constr =
   | TmPair(t1, t2) -> let (ty1, c1) = generateconstraints ctx t1 in 
                       let (ty2, c2) = generateconstraints ctx t2 in (TpPair(ty1, ty2), c1 @ c2)
   | TmFst t1 ->  let (typ, c) = generateconstraints ctx t1 in
-                  let a = TpVar ((term_to_str t1) ^"_a_fst") and b = TpVar ((term_to_str t1) ^"_b_fst") in
+                  let a = TpVar ((term_to_str t1) ^ fresh_count() ^ "_a_fst") and b = TpVar ((term_to_str t1) ^ fresh_count() ^ "_b_fst") in
                   let c_fst = [(typ, TpPair(a, b))] in  (a, c @ c_fst)
   | TmSnd t1 -> let (typ, c) = generateconstraints ctx t1 in
-                let a = TpVar  ((term_to_str t1) ^"_a_snd") and b = TpVar  ((term_to_str t1) ^"_b_snd") in
+                let a = TpVar  ((term_to_str t1) ^fresh_count() ^ "_a_snd") and b = TpVar  ((term_to_str t1) ^fresh_count() ^ "_b_snd") in
                 let c_snd = [(typ, TpPair(a, b))] in (b, c @ c_snd)
   | TmIf(cond, t1, t2) -> let (cond_type, c_cond) = generateconstraints ctx cond in
                           let (t1_type, c1) = generateconstraints ctx t1 in
@@ -187,7 +185,7 @@ let rec generateconstraints (ctx : context) (tm : term) : tp * constr =
                           (t1_type, c_cond @ c1 @ c2 @ c_if)                          
   | TmMatch (t,patterns) -> 
     let (ty,ct) = generateconstraints ctx t in
-    let rs = TpVar((term_to_str t) ^"match") in 
+    let rs = TpVar((term_to_str t) ^ fresh_count() ^ "match") in 
     let rec process_cases cases ctx constraints = 
       match cases with
       | [] -> []
@@ -198,7 +196,7 @@ let rec generateconstraints (ctx : context) (tm : term) : tp * constr =
         c_pat @ c_e @ c_match @ process_cases rest ctx constraints in
         let constraints = process_cases patterns  ctx [] in (rs, ct @ constraints)
   | TmFix((x, typ), t1, t2) -> 
-     let ctx' = (x, Forall ([x], typ)) :: (remove_binding x ctx) in
+     let ctx' = (x, Forall ([], typ)) :: (remove_binding x ctx) in
      let (t1_type, c1) = generateconstraints ctx' t1 in
      let c_fix = [(t1_type, typ)] in
                              let (t2_type, c2) = generateconstraints ctx' t2 in (t2_type, c1 @ c_fix @ c2)
@@ -210,7 +208,8 @@ let rec generateconstraints (ctx : context) (tm : term) : tp * constr =
     let freevars_ctx = fv_ctx ctx in
     let freevars_tp = fv_tp t in
     let generalized_vars = List.filter (fun x -> not (List.mem x freevars_ctx)) freevars_tp in
-    Forall(generalized_vars, t)
+    let unique_generalized_vars =  List.sort_uniq compare generalized_vars
+    in Forall(unique_generalized_vars, t)
   
   and instantiate (Forall (vars, t):scheme) =  (* REF : url1 *)
     let get_fresh vars = List.map (fun var -> TpVar (var^fresh_count())) vars in  
@@ -226,7 +225,7 @@ let rec generateconstraints (ctx : context) (tm : term) : tp * constr =
       | TpArr (t1, t2) -> TpArr (subst_tp t1, subst_tp t2)
       | TpPair (t1, t2) -> TpPair (subst_tp t1, subst_tp t2)
       | TpDef (x, t1) -> TpDef (x, subst_tp t1)
-      in subst_tp t 
+      in  subst_tp t 
   and fresh_count  = 
     let count = ref 0 in
     fun () -> let c = !count in count := c + 1; string_of_int c
@@ -237,7 +236,7 @@ let rec unify (constraints:constr) : sigma =
   | [] -> []
   | (s, t) :: rest -> 
     if s = t then unify rest
-    else (print_endline (tp_to_str s ^ " = " ^ tp_to_str t);  (match (s, t) with 
+    else (  (match (s, t) with 
         | (TpArr (s1, s2), TpArr (t1, t2)) -> unify ((s1, t1) :: (s2, t2) :: rest)
         | (TpPair (s1, s2), TpPair (t1, t2)) -> unify ((s1, t1) :: (s2, t2) :: rest)
         | (TpDef (x, s), t) -> unify ((TpVar x, s) :: (TpVar x , t) :: rest )
@@ -279,28 +278,9 @@ let unify_print (constraints:constr) : unit =
   print_sigma (unify constraints)
 
 
-(* x=0 ; p=(x, x) ; app [lambda y : (A, A) = if (y.fst iszero) then (y.snd) else 0] p *)
-let program = 
-  TmLet ("id", TmLam (("x", TpVar "A"), TmVar "x"), 
-  TmPair (TmApp (TmVar "id", TmZero), TmApp (TmVar "id", TmTrue)))
-
-let program = 
-    TmLet ("id",  TmLam (("x", TpVar "X"), TmVar "x"), 
-    TmLet ("fun", TmLam (("g", TpVar "A"), TmPair (TmApp (TmVar "g", TmZero), TmApp (TmVar "g", TmTrue))), 
-    TmApp (TmVar "fun", TmVar "id")))
-  
-(*
-let () = check_type program TpNat;;
-let()= print_endline "----------------\n";;
-
-*) 
-
-let (final_type, constraints) =  (generateconstraints [] program)
-let () = unify_print constraints
 
 
-
-(* =======================================================
+  (* ======================================================= *)
   let x = ref 0 
   let print_count () = 
     print_endline "----------------"; 
@@ -308,9 +288,19 @@ let () = unify_print constraints
     print_newline () ;
     x := !x +1
 
-                  
-(* let id = fun x -> x in (id 5, id true) *)
+(* ======================================================= *)
 
-let () = print_count(); check_type program (TpPair (TpNat, TpBool))
+(* 
+    typedef natPair = (nat, nat)
+    let first = (fun (p:natPari) -> fst p) in 
+    fst (0, 0) 
+*)
+ let prog = 
+  TmTypedef (("natPair", TpPair (TpNat, TpNat)), 
+  TmLet ("first", TmLam (("p", TpVar "natPair") , TmFst (TmVar "p")), 
+  TmApp( TmVar "first", TmPair (TmZero, TmZero)) ))
 
- *)
+let () = print_count(); check_type prog  (TpNat)
+
+let (final_type, constraints) =  (generateconstraints [] prog)
+let () = unify_print constraints
