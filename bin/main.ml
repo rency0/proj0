@@ -1,4 +1,3 @@
-(* url1==https://www.researchgate.net/publication/2528716_Generalizing_Hindley-Milner_Type_Inference_Algorithms *)
 type var_name = string 
 type type_name = string  
 
@@ -46,8 +45,7 @@ type term =
 type scheme = Forall of (type_name list) * tp 
 type context = (var_name * scheme) list
 type sigma  = (type_name * tp) list
-type constraint_type = | Equiv | InstanceOf
-type constr = (tp * tp * constraint_type) list 
+type constr = (tp * tp) list 
 
 exception UnificationError of string
 
@@ -92,15 +90,10 @@ let rec term_to_str (t:term) : string = match t with
     | PPred p1 -> "pred (" ^ (pattern_to_str p1) ^ ")"
     | PPair (p1, p2) -> "<" ^ (pattern_to_str p1) ^ ", " ^ (pattern_to_str p2) ^ ">"
 let print_constraints (constraints:constr) : unit = 
-  List.iter (fun (s, t, op) -> match op with  
-  | Equiv -> Printf.printf "%s = %s\n" (tp_to_str s) (tp_to_str t) 
-  | InstanceOf -> Printf.printf "%s <: %s\n" (tp_to_str s) (tp_to_str t)) 
-  constraints 
+  List.iter (fun (s, t) -> Printf.printf "%s = %s\n" (tp_to_str s) (tp_to_str t)) constraints
 let print_sigma (sigma:sigma) : unit =
   List.iter (fun (x, t) -> Printf.printf "%s = %s\n" x (tp_to_str t)) sigma
-let print_ctx (ctx:context) : unit =
-  List.iter (fun (x, scheme) -> Printf.printf "%s = %s\n" x (match scheme with Forall (vars, t) -> tp_to_str t)) ctx
-  (* ------------------------- *)
+(* ------------------------- *)
 
 (* generate list of free variables *)
 let rec fv_tp (t:tp) : type_name list = 
@@ -120,7 +113,6 @@ let fv_ctx (ctx:context) : type_name list =
       if List.mem x acc then acc else x::acc) acc (fv_scheme scheme)) [] ctx
 
 (* creation of constraints based off of term *)
-(* REF : url1 *)
 let remove_binding (x : type_name) (ctx : context) : context =
   List.filter (fun (y, _) -> y <> x) ctx
 
@@ -133,7 +125,7 @@ match t' with
 | TpPair (t1, t2) -> TpPair (replace x t t1, replace x t t2)
 | _ -> t'
   
-
+  
 
 let rec generate_pattern_constraints (ctx:context) (pat:pattern) : context * constr * tp  =
   match pat with
@@ -142,7 +134,7 @@ let rec generate_pattern_constraints (ctx:context) (pat:pattern) : context * con
   | PTrue | PFalse -> ([], [], TpBool)
   | PZero -> ([], [], TpNat) 
   | PSucc n  | PPred n ->let (ctx1, c1, t1) = generate_pattern_constraints ctx n in
-                            (ctx1, c1 @ [(t1, TpNat, Equiv)], TpNat)
+                            (ctx1, c1 @ [(t1, TpNat)], TpNat)
   | PPair (p1, p2) -> 
         let (ctx1, c1, t1) = generate_pattern_constraints ctx p1 in
         let (ctx2, c2, t2) = generate_pattern_constraints ctx p2 in
@@ -150,92 +142,81 @@ let rec generate_pattern_constraints (ctx:context) (pat:pattern) : context * con
 
 
 
-let rec generateconstraints (ctx : context) (tm : term) : tp * constr * context =
+let rec generateconstraints (ctx : context) (tm : term) : tp * constr =
   match tm with
   | TmVar x ->(match List.assoc_opt x ctx with
-              | Some scheme -> (instantiate scheme, [], (x, scheme)::ctx )
+              | Some scheme -> (instantiate scheme, [])
               | None ->  raise (UnificationError ("Variable "^ x ^" not found")))
-  | TmUnit ->  (TpUnit, [], ctx)
-  | TmTrue ->  (TpBool, [], ctx )
-  | TmFalse -> (TpBool, [], ctx )
-  | TmZero ->  (TpNat, [], ctx )
-  | TmSucc t1 -> let (typ, c, ctx') = generateconstraints ctx t1 in (TpNat, c @ [(typ, TpNat, Equiv)], ctx') (* enforce that t1: TpNat *)
-  | TmPred t1 -> let (typ, c, ctx') = generateconstraints ctx t1 in (TpNat, c @ [(typ, TpNat, Equiv)], ctx')
-  | TmIsZero t1 -> let (typ, c, ctx') = generateconstraints ctx t1 in(TpBool, c @ [(typ, TpNat, Equiv)], ctx' ) (* enforce t1:TpNat and the result is a bool*)
-  | TmLam((x, typ), t1) -> 
-    let (t1_type, c, ctx') = generateconstraints ((x, Forall ([x], typ)) :: ctx) t1 
-    in (TpArr(typ, t1_type), c , ctx')
-  | TmApp(t1, t2) -> let (t1_type, c1, ctx1) = generateconstraints ctx t1 in
-                      let (t2_type, c2, ctx2) = generateconstraints ctx t2 in
+  | TmUnit ->  (TpUnit, [])
+  | TmTrue ->  (TpBool, [])
+  | TmFalse -> (TpBool, [])
+  | TmZero ->  (TpNat, [])
+  | TmSucc t1 -> let (typ, c) = generateconstraints ctx t1 in (TpNat, c @ [(typ, TpNat)]) (* enforce that t1: TpNat *)
+  | TmPred t1 -> let (typ, c) = generateconstraints ctx t1 in (TpNat, c @ [(typ, TpNat)])
+  | TmIsZero t1 -> let (typ, c) = generateconstraints ctx t1 in(TpBool, c @ [(typ, TpNat)]) (* enforce t1:TpNat and the result is a bool*)
+  | TmLam((x, typ), t1) -> let (t1_type, c) = generateconstraints ((x, Forall ([], typ)) :: ctx) t1 in (TpArr(typ, t1_type), c)
+  | TmApp(t1, t2) -> let (t1_type, c1) = generateconstraints ctx t1 in
+                      let (t2_type, c2) = generateconstraints ctx t2 in
                       let f = TpVar (term_to_str(t1) ^ "x_app") in  
-                      let c_app = [(t1_type, TpArr(t2_type, f), Equiv)] in (f, c1 @ c2 @ c_app, ctx1 @ ctx2)
+                      let c_app = [(t1_type, TpArr(t2_type, f))] in (f, c1 @ c2 @ c_app)
   | TmLet(x, t1, t2) -> 
-        let (t1_type, c1, ctx1) = generateconstraints ctx t1 in
+        let (t1_type, c1) = generateconstraints ctx t1 in
         let f_scheme = generalize ctx t1_type in
         let f = TpVar x in  
         let ctx' = (x, f_scheme) :: (remove_binding x ctx) in
-        let (t2_type, c2, ctx2) = generateconstraints ctx' t2 in
-        let c_let = [(f, t1_type, InstanceOf)] in
-        (t2_type, c1 @ c_let @ c2, ctx1 @ (remove_binding x ctx2) )
-  | TmPair(t1, t2) -> let (ty1, c1, ctx1) = generateconstraints ctx t1 in 
-                      let (ty2, c2, ctx2) = generateconstraints ctx t2 in
-                       (TpPair(ty1, ty2), c1 @ c2, ctx1 @ ctx2)
-  | TmFst t1 ->  let (typ, c, ctx') = generateconstraints ctx t1 in
+        let (t2_type, c2) = generateconstraints ctx' t2 in
+        let c_let = [(f, t1_type)] in
+        (t2_type, c1 @ c_let @ c2)
+  | TmPair(t1, t2) -> let (ty1, c1) = generateconstraints ctx t1 in 
+                      let (ty2, c2) = generateconstraints ctx t2 in (TpPair(ty1, ty2), c1 @ c2)
+  | TmFst t1 ->  let (typ, c) = generateconstraints ctx t1 in
                   let a = TpVar ((term_to_str t1) ^"_a_fst") and b = TpVar ((term_to_str t1) ^"_b_fst") in
-                  let c_fst = [(typ, TpPair(a, b), Equiv)] in  (a, c @ c_fst, ctx')
-  | TmSnd t1 -> let (typ, c, ctx') = generateconstraints ctx t1 in
+                  let c_fst = [(typ, TpPair(a, b))] in  (a, c @ c_fst)
+  | TmSnd t1 -> let (typ, c) = generateconstraints ctx t1 in
                 let a = TpVar  ((term_to_str t1) ^"_a_snd") and b = TpVar  ((term_to_str t1) ^"_b_snd") in
-                let c_snd = [(typ, TpPair(a, b), Equiv)] in (b, c @ c_snd, ctx')
-  | TmIf(cond, t1, t2) -> let (cond_type, c_cond, ctx1) = generateconstraints ctx cond in
-                          let (t1_type, c1, ctx2) = generateconstraints ctx t1 in
-                          let (t2_type, c2, ctx3) = generateconstraints ctx t2 in
+                let c_snd = [(typ, TpPair(a, b))] in (b, c @ c_snd)
+  | TmIf(cond, t1, t2) -> let (cond_type, c_cond) = generateconstraints ctx cond in
+                          let (t1_type, c1) = generateconstraints ctx t1 in
+                          let (t2_type, c2) = generateconstraints ctx t2 in
                           (* Condition must be boolean and branches must have the same type *)
-                          let c_if = [(cond_type, TpBool, Equiv); (t1_type, t2_type, Equiv)] in
-                          (t1_type, c_cond @ c1 @ c2 @ c_if, ctx1 @ ctx2 @ ctx3)                          
+                          let c_if = [(cond_type, TpBool); (t1_type, t2_type)] in
+                          (t1_type, c_cond @ c1 @ c2 @ c_if)                          
   | TmMatch (t,patterns) -> 
-    let (ty,ct, ctx') = generateconstraints ctx t in
+    let (ty,ct) = generateconstraints ctx t in
     let rs = TpVar((term_to_str t) ^"match") in 
-    let rec process_cases cases ctx (constraints:constr) = 
+    let rec process_cases cases ctx constraints = 
       match cases with
       | [] -> []
       | (pat, e) :: rest -> 
         let (ctx', c_pat, pat_type) = generate_pattern_constraints ctx pat in
-        let (e_type, c_e, ctx_e) = generateconstraints (ctx' @ ctx) e in
-        let c_match = [(e_type, rs, Equiv)] in  (* All branches must return same type *)
+        let (e_type, c_e) = generateconstraints (ctx' @ ctx) e in
+        let c_match = [(e_type, rs)] in  (* All branches must return same type *)
         c_pat @ c_e @ c_match @ process_cases rest ctx constraints in
-        let constraints = process_cases patterns  ctx [] in (rs, ct @ constraints, ctx')
+        let constraints = process_cases patterns  ctx [] in (rs, ct @ constraints)
   | TmFix((x, typ), t1, t2) -> 
-     let ctx' = (x, Forall ([x], typ)) :: (remove_binding x ctx) in
-     let (t1_type, c1, ctx1) = generateconstraints ctx' t1 in
-     let c_fix = [(t1_type, typ, Equiv)] in
-     let (t2_type, c2, ctx2) = generateconstraints ctx' t2 
-    in (t2_type, c1 @ c_fix @ c2, ctx1 @ ctx2)
-  | TmTypedef ((typ_name, typ) , t) ->
-    let (t_typ ,c, ctx') = generateconstraints ctx t in 
-    ( t_typ , ((TpVar typ_name, typ, Equiv)::c ), ctx')
+     let ctx' = (x, Forall ([], typ)) :: (remove_binding x ctx) in
+     let (t1_type, c1) = generateconstraints ctx' t1 in
+     let c_fix = [(t1_type, typ)] in
+                             let (t2_type, c2) = generateconstraints ctx' t2 in (t2_type, c1 @ c_fix @ c2)
+| TmTypedef ((typ_name, typ) , t) ->
+  let (t_typ ,c) = generateconstraints ctx t in 
+  ( t_typ , ((TpVar typ_name, typ)::c ))
 
-  
-    and generalize (ctx:context) (t:tp) : scheme = (* REF : url1 *)
-    let freevars_ctx = fv_ctx ctx in
-    let freevars_tp = fv_tp t in
-    let generalized_vars = List.filter (fun x -> not (List.mem x freevars_ctx)) freevars_tp in
+  and generalize (ctx:context) (t:tp) : scheme =
+    let ctx_ftv = fv_ctx ctx in
+    let t_ftv = fv_tp t in
+    let generalized_vars = List.filter (fun x -> not (List.mem x ctx_ftv)) t_ftv in
     Forall(generalized_vars, t)
   
-  and instantiate (Forall (vars, t):scheme) =  (* REF : url1 *)
-    let get_fresh vars = List.map (fun var -> TpVar (var^fresh_count())) vars in  
-    let fresh_vars = get_fresh vars in
-    let subst_list = List.combine vars fresh_vars in 
-    let rec subst_tp t  = 
-      match t with 
-      | TpBool | TpNat | TpUnit -> t
-      | TpVar x ->
-          (match List.assoc_opt x subst_list with
-            | Some tp -> tp
-            | None -> TpVar x)
-      | TpArr (t1, t2) -> TpArr (subst_tp t1, subst_tp t2)
-      | TpPair (t1, t2) -> TpPair (subst_tp t1, subst_tp t2)
-      | TpDef (x, t1) -> TpDef (x, subst_tp t1)
-      in subst_tp t 
+  and instantiate (Forall(vars, t)) = 
+    print_endline (">>> \n" ^ (tp_to_str t));
+    print_endline (">>> \t" ^ (String.concat ", " vars) ); 
+    let fresh_sufix = fresh_count () in 
+    let subst_list = List.map (fun var -> (var ^ fresh_sufix, TpVar (var ^ fresh_sufix))) vars in
+    print_endline (">>> \t" ^ (String.concat ", " (List.map (fun (x, _) -> x) subst_list)) );
+    let result = List.fold_left (fun t (x, t_sub) -> replace x t_sub t) t subst_list in 
+    print_endline (">>>>>> " ^ (tp_to_str result) ^ "\n");
+    result
   and fresh_count  = 
     let count = ref 0 in
     fun () -> let c = !count in count := c + 1; string_of_int c
@@ -244,28 +225,17 @@ let rec generateconstraints (ctx : context) (tm : term) : tp * constr * context 
 let rec unify (constraints:constr) : sigma =
   match constraints with
   | [] -> []
-  | (s, t, Equiv) :: rest -> 
+  | (s, t) :: rest -> 
     if s = t then unify rest
     else (print_endline (tp_to_str s ^ " = " ^ tp_to_str t);  (match (s, t) with 
-        | (TpArr (s1, s2), TpArr (t1, t2)) -> unify ((s1, t1, Equiv) :: (s2, t2, Equiv) :: rest)
-        | (TpPair (s1, s2), TpPair (t1, t2)) -> unify ((s1, t1, Equiv) :: (s2, t2, Equiv) :: rest)
-        | (TpDef (x, s), t) -> unify ((TpVar x, s, Equiv) :: (TpVar x , t, Equiv) :: rest )
-        | (t, TpDef (x, s)) -> unify ((TpVar x, s, Equiv) :: (TpVar x , t, Equiv) :: rest )
+        | (TpArr (s1, s2), TpArr (t1, t2)) -> unify ((s1, t1) :: (s2, t2) :: rest)
+        | (TpPair (s1, s2), TpPair (t1, t2)) -> unify ((s1, t1) :: (s2, t2) :: rest)
+        | (TpDef (x, s), t) -> unify ((TpVar x, s) :: (TpVar x , t) :: rest )
+        | (t, TpDef (x, s)) -> unify ((TpVar x, s) :: (TpVar x , t) :: rest )
         | (TpVar x, t) when not (occurs x t) -> (x, t) :: unify (subst (x, t) rest)
         | (t, TpVar x) when not (occurs x t) -> (x, t) :: unify (subst (x, t) rest)
         | ( _ , _ ) -> raise (UnificationError ("Unification failed: " ^ (tp_to_str s) ^ " = " ^ (tp_to_str t)) )
       ))
-  | (s, t, InstanceOf) :: rest -> 
-    if s = t then unify rest 
-    else match (s,t) with 
-      | (TpArr (s1, s2), TpArr (t1, t2)) -> unify ((s1, t1, InstanceOf) :: (s2, t2, InstanceOf) :: rest)
-      | (TpPair (s1, s2), TpPair (t1, t2)) -> unify ((s1, t1, InstanceOf) :: (s2, t2, InstanceOf) :: rest)
-      | (TpDef (x, s), t) -> unify ((TpVar x, s, InstanceOf) :: (TpVar x , t, InstanceOf) :: rest )
-      | (t, TpDef (x, s)) -> unify ((TpVar x, s, InstanceOf) :: (TpVar x , t, InstanceOf) :: rest )
-      | (TpVar x, t) when not (occurs x t) -> (x, t) :: unify (dup (x, t) rest)
-      | (t, TpVar x) when not (occurs x t) -> (x, t) :: unify (dup (x, t) rest)
-      | ( _ , _ ) -> raise (UnificationError ("Unification failed: " ^ (tp_to_str s) ^ " <: " ^ (tp_to_str t)) )
-
   (* X ∈ FV(T) *)
 and occurs (x:type_name) (t:tp) : bool =
   match t with
@@ -277,13 +247,12 @@ and occurs (x:type_name) (t:tp) : bool =
 
   (* [X/T] C *)
 and subst ((x:type_name), (t:tp)) (constraints:constr) : constr =
-  List.map (fun (s, u, op) -> (replace x t s, replace x t u, op)) constraints
+  List.map (fun (s, u) -> (replace x t s, replace x t u)) constraints
 
-(* check if the inferred type matches the intended type *)
 
 
 let check_type (program:term) (intended_type:tp) : unit = 
-  let (inferred_type, constraints, final_ctx) = generateconstraints [] program in
+  let (inferred_type, constraints) = generateconstraints [] program in
   let inferred_subs = unify constraints in
   let result_type = List.fold_right (fun (x, t_sub) acc -> replace x t_sub acc) inferred_subs inferred_type in
   if ((tp_to_str result_type) = (tp_to_str intended_type)) then 
