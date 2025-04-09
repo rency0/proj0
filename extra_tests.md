@@ -139,10 +139,17 @@ let () = check_type program (TpNat)
 
 # Typdef testing 
 ```ocaml
+
 let prog = TmTypedef (("natPair", TpPair (TpNat, TpNat)), 
     TmLam (("p", TpVar "natPair"),  TmTrue ))
   
-let () = check_type prog  (TpArr ( TpPair (TpNat, TpNat), TpBool) )
+let () = print_count(); check_type prog  (TpArr ( TpPair (TpNat, TpNat), TpBool) ); print_endline "============="
+
+let prog = TmTypedef (("natPair", TpPair (TpNat, TpNat)), 
+    TmApp (TmLam (("p", TpVar "natPair"),  TmFst (TmVar "p")), 
+    TmPair (TmZero, TmZero)))
+  
+let () = print_count(); check_type prog  (TpNat ); print_endline "============="
 
 
 let prog = TmTypedef (("natPair", TpPair (TpNat, TpNat)), 

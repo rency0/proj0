@@ -146,7 +146,7 @@ let rec generate_pattern_constraints (ctx:context) (pat:pattern) : context * con
 
 let rec generateconstraints (ctx : context) (tm : term) : tp * constr =
   match tm with
-  | TmVar x ->(match List.assoc_opt x ctx with
+  | TmVar x ->( match List.assoc_opt x ctx with
               | Some scheme -> (instantiate scheme, [])
               | None ->  raise (UnificationError ("Variable "^ x ^" not found")))
   | TmUnit ->  (TpUnit, [])
@@ -270,37 +270,3 @@ let check_type (program:term) (intended_type:tp) : unit =
   else
     print_endline ("Type check failed: expected " ^ (tp_to_str intended_type) ^ " but got " ^ (tp_to_str result_type))
 
-
-let unify_print (constraints:constr) : unit =
-  print_endline "Constraints:";
-  print_constraints (constraints); 
-  print_endline "\nUnification Result:";
-  print_sigma (unify constraints)
-
-
-
-
-  (* ======================================================= *)
-  let x = ref 0 
-  let print_count () = 
-    print_endline "----------------"; 
-    print_int !x ; 
-    print_newline () ;
-    x := !x +1
-
-(* ======================================================= *)
-
-(* 
-    typedef natPair = (nat, nat)
-    let first = (fun (p:natPari) -> fst p) in 
-    fst (0, 0) 
-*)
- let prog = 
-  TmTypedef (("natPair", TpPair (TpNat, TpNat)), 
-  TmLet ("first", TmLam (("p", TpVar "natPair") , TmFst (TmVar "p")), 
-  TmApp( TmVar "first", TmPair (TmZero, TmZero)) ))
-
-let () = print_count(); check_type prog  (TpNat)
-
-let (final_type, constraints) =  (generateconstraints [] prog)
-let () = unify_print constraints
