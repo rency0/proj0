@@ -1,3 +1,4 @@
+(* url1==https://www.researchgate.net/publication/2528716_Generalizing_Hindley-Milner_Type_Inference_Algorithms *)
 type var_name = string 
 type type_name = string  
 
@@ -93,7 +94,9 @@ let print_constraints (constraints:constr) : unit =
   List.iter (fun (s, t) -> Printf.printf "%s = %s\n" (tp_to_str s) (tp_to_str t)) constraints
 let print_sigma (sigma:sigma) : unit =
   List.iter (fun (x, t) -> Printf.printf "%s = %s\n" x (tp_to_str t)) sigma
-(* ------------------------- *)
+let print_ctx (ctx:context) : unit =
+  List.iter (fun (x, scheme) -> Printf.printf "%s = %s\n" x (match scheme with Forall (vars, t) -> tp_to_str t)) ctx
+  (* ------------------------- *)
 
 (* generate list of free variables *)
 let rec fv_tp (t:tp) : type_name list = 
@@ -113,6 +116,7 @@ let fv_ctx (ctx:context) : type_name list =
       if List.mem x acc then acc else x::acc) acc (fv_scheme scheme)) [] ctx
 
 (* creation of constraints based off of term *)
+(* REF : url1 *)
 let remove_binding (x : type_name) (ctx : context) : context =
   List.filter (fun (y, _) -> y <> x) ctx
 
@@ -125,7 +129,7 @@ match t' with
 | TpPair (t1, t2) -> TpPair (replace x t t1, replace x t t2)
 | _ -> t'
   
-  
+
 
 let rec generate_pattern_constraints (ctx:context) (pat:pattern) : context * constr * tp  =
   match pat with
@@ -154,7 +158,7 @@ let rec generateconstraints (ctx : context) (tm : term) : tp * constr =
   | TmSucc t1 -> let (typ, c) = generateconstraints ctx t1 in (TpNat, c @ [(typ, TpNat)]) (* enforce that t1: TpNat *)
   | TmPred t1 -> let (typ, c) = generateconstraints ctx t1 in (TpNat, c @ [(typ, TpNat)])
   | TmIsZero t1 -> let (typ, c) = generateconstraints ctx t1 in(TpBool, c @ [(typ, TpNat)]) (* enforce t1:TpNat and the result is a bool*)
-  | TmLam((x, typ), t1) -> let (t1_type, c) = generateconstraints ((x, Forall ([], typ)) :: ctx) t1 in (TpArr(typ, t1_type), c)
+  | TmLam((x, typ), t1) -> let (t1_type, c) = generateconstraints ((x, Forall ([x], typ)) :: ctx) t1 in (TpArr(typ, t1_type), c)
   | TmApp(t1, t2) -> let (t1_type, c1) = generateconstraints ctx t1 in
                       let (t2_type, c2) = generateconstraints ctx t2 in
                       let f = TpVar (term_to_str(t1) ^ "x_app") in  
@@ -194,29 +198,35 @@ let rec generateconstraints (ctx : context) (tm : term) : tp * constr =
         c_pat @ c_e @ c_match @ process_cases rest ctx constraints in
         let constraints = process_cases patterns  ctx [] in (rs, ct @ constraints)
   | TmFix((x, typ), t1, t2) -> 
-     let ctx' = (x, Forall ([], typ)) :: (remove_binding x ctx) in
+     let ctx' = (x, Forall ([x], typ)) :: (remove_binding x ctx) in
      let (t1_type, c1) = generateconstraints ctx' t1 in
      let c_fix = [(t1_type, typ)] in
                              let (t2_type, c2) = generateconstraints ctx' t2 in (t2_type, c1 @ c_fix @ c2)
-| TmTypedef ((typ_name, typ) , t) ->
+  | TmTypedef ((typ_name, typ) , t) ->
   let (t_typ ,c) = generateconstraints ctx t in 
   ( t_typ , ((TpVar typ_name, typ)::c ))
-
-  and generalize (ctx:context) (t:tp) : scheme =
-    let ctx_ftv = fv_ctx ctx in
-    let t_ftv = fv_tp t in
-    let generalized_vars = List.filter (fun x -> not (List.mem x ctx_ftv)) t_ftv in
+  
+    and generalize (ctx:context) (t:tp) : scheme = (* REF : url1 *)
+    let freevars_ctx = fv_ctx ctx in
+    let freevars_tp = fv_tp t in
+    let generalized_vars = List.filter (fun x -> not (List.mem x freevars_ctx)) freevars_tp in
     Forall(generalized_vars, t)
   
-  and instantiate (Forall(vars, t)) = 
-    print_endline (">>> \n" ^ (tp_to_str t));
-    print_endline (">>> \t" ^ (String.concat ", " vars) ); 
-    let fresh_sufix = fresh_count () in 
-    let subst_list = List.map (fun var -> (var ^ fresh_sufix, TpVar (var ^ fresh_sufix))) vars in
-    print_endline (">>> \t" ^ (String.concat ", " (List.map (fun (x, _) -> x) subst_list)) );
-    let result = List.fold_left (fun t (x, t_sub) -> replace x t_sub t) t subst_list in 
-    print_endline (">>>>>> " ^ (tp_to_str result) ^ "\n");
-    result
+  and instantiate (Forall (vars, t):scheme) =  (* REF : url1 *)
+    let get_fresh vars = List.map (fun var -> TpVar (var^fresh_count())) vars in  
+    let fresh_vars = get_fresh vars in
+    let subst_list = List.combine vars fresh_vars in 
+    let rec subst_tp t  = 
+      match t with 
+      | TpBool | TpNat | TpUnit -> t
+      | TpVar x ->
+          (match List.assoc_opt x subst_list with
+            | Some tp -> tp
+            | None -> TpVar x)
+      | TpArr (t1, t2) -> TpArr (subst_tp t1, subst_tp t2)
+      | TpPair (t1, t2) -> TpPair (subst_tp t1, subst_tp t2)
+      | TpDef (x, t1) -> TpDef (x, subst_tp t1)
+      in subst_tp t 
   and fresh_count  = 
     let count = ref 0 in
     fun () -> let c = !count in count := c + 1; string_of_int c
@@ -236,6 +246,7 @@ let rec unify (constraints:constr) : sigma =
         | (t, TpVar x) when not (occurs x t) -> (x, t) :: unify (subst (x, t) rest)
         | ( _ , _ ) -> raise (UnificationError ("Unification failed: " ^ (tp_to_str s) ^ " = " ^ (tp_to_str t)) )
       ))
+
   (* X ∈ FV(T) *)
 and occurs (x:type_name) (t:tp) : bool =
   match t with
@@ -261,11 +272,11 @@ let check_type (program:term) (intended_type:tp) : unit =
     print_endline ("Type check failed: expected " ^ (tp_to_str intended_type) ^ " but got " ^ (tp_to_str result_type))
 
 
-    let unify_print (constraints:constr) : unit =
-      print_endline "Constraints:";
-      print_constraints (constraints); 
-      print_endline "\nUnification Result:";
-      print_sigma (unify constraints)
+let unify_print (constraints:constr) : unit =
+  print_endline "Constraints:";
+  print_constraints (constraints); 
+  print_endline "\nUnification Result:";
+  print_sigma (unify constraints)
 
 
 (* x=0 ; p=(x, x) ; app [lambda y : (A, A) = if (y.fst iszero) then (y.snd) else 0] p *)
