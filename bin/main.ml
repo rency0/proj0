@@ -45,6 +45,7 @@ type term =
     | PPred of pattern
     | PPair of pattern * pattern
 
+    
 type scheme = Forall of (type_name list) * tp 
 type context = (var_name * scheme) list
 type sigma  = (type_name * tp) list
@@ -242,7 +243,7 @@ and generalize (ctx:context) (t:tp) : scheme = (* REF : url1 *)
   in Forall(unique_generalized_vars, t)
 and remove_binding (x : type_name) (ctx : context) : context = (* REF : url1 *)
   List.filter (fun (y, _) -> y <> x) ctx
-and instantiate (Forall (vars, t):scheme) =  (* REF : url1 *)
+and instantiate (Forall (vars, t):scheme) : tp =  (* REF : url1 *)
   let get_fresh vars = List.map (fun var -> TpVar (var^fresh_count())) vars in  
   let fresh_vars = get_fresh vars in
   let subst_list = List.combine vars fresh_vars in 
@@ -300,151 +301,23 @@ let check_type (program:term) (intended_type:tp) : unit =
     print_endline ("Type check failed: expected " ^ (tp_to_str intended_type) ^ " but got " ^ (tp_to_str result_type))
 (* =============================== *)
 
-(* ======================================================= *)
-let x = ref 0 
-let print_count () = 
-  print_endline "----------------"; 
-  print_int !x ; 
-  print_newline () ;
-  x := !x +1
-
-
-(* let id = fun x -> x in (id 0 , id true )   *)
-let program = 
-  TmLet ("id",  TmLam (("x", TpVar "X"), TmVar "x"), 
-  TmPair (TmApp (TmVar "id", TmZero), TmApp (TmVar "id", TmTrue)))
-
-let () =print_count(); check_type program (TpPair(TpNat, TpBool));;
-
 (* inc=λx.(s x) ; p=(T, 0) ; if (p.fst) then (inc p.snd) else (inc (inc p.snd))*)
-let program =   
-TmLet ("inc",
-  TmLam (("x", TpNat), TmSucc (TmVar "x")),
-TmLet ("p",
-  TmPair (TmTrue, TmZero),
-TmIf (TmFst (TmVar "p"),
-  TmApp (TmVar "inc", TmSnd (TmVar "p")),
-  TmApp (TmVar "inc", TmApp( TmVar "inc", TmSnd (TmVar "p"))))))
-let () = print_count();  check_type program (TpNat)
 
-(* x=(0 , 1) ; y=(T, F) ; if (x.fst == 0) then y.fst else y.snd*)
-let program = TmLet ("x", TmPair (TmZero, TmSucc (TmZero)) , 
-            TmLet("y" , TmPair(TmTrue, TmFalse), 
-            TmIf (TmIsZero (TmFst (TmVar "x")), TmFst (TmVar "y"), TmSnd (TmVar "y"))))
-let () = print_count() ; check_type program (TpBool)
 
-(* x=0 ; p=(x, x) ; lambda y : (A, A) = if (y.fst iszero) then (y.snd) else 0 *)
+
+let program = TmLet ("x" )
 let program = 
-TmLet ("x", TmZero, 
-TmLet ("p", TmPair (TmVar "x", TmVar "x"), 
-TmApp ( 
-  TmLam (("y", TpPair (TpVar("A"),TpVar("A"))), 
-  TmIf (TmIsZero (TmFst (TmVar "y")), TmSnd (TmVar "y"), TmZero)), 
-TmVar "p")))
-let () = print_count(); check_type program TpNat;;
+  TmLet ("id",  TmLam (("x", TpVar "??"), TmVar "x"), 
+  TmPair (TmApp (TmVar "id", TmZero), 
+          TmApp (TmVar "id", TmTrue)))
 
+let () = check_type program (TpPair(TpNat , TpBool))
 
-(* inc=λx.(s x) ; p=(T, 0) ; if (p.fst) then (inc p.snd) else (inc (inc p.snd))*)
-let program =   
-TmLet ("inc",
-  TmLam (("x", TpNat), TmSucc (TmVar "x")),
-TmLet ("p",
-  TmPair (TmTrue, TmZero),
-TmIf (TmFst (TmVar "p"),
-  TmApp (TmVar "inc", TmSnd (TmVar "p")),
-  TmApp (TmVar "inc", TmApp( TmVar "inc", TmSnd (TmVar "p"))))))
+  
+let rec for_loop = fun i ->
+  if i=0
+  then ()
+  else for_loop (i-1) 
 
-let () = print_count();  check_type program (TpNat)
+let result = for_loop 2
 
-(* x=(0 , 1) ; y=(T, F) ; if (x.fst == 0) then y.fst else y.snd*)
-let program = TmLet ("x", TmPair (TmZero, TmSucc (TmZero)) , 
-TmLet("y" , TmPair(TmTrue, TmFalse), 
-TmIf (TmIsZero (TmFst (TmVar "x")), TmFst (TmVar "y"), TmSnd (TmVar "y"))))
-
-let () = print_count(); check_type program (TpBool)
-
-(* x=0 ; p=(x, x) ; lambda y : (A, A) = if (y.fst iszero) then (y.snd) else 0 *)
-let program = 
-TmLet ("x", TmZero, 
-TmLet ("p", TmPair (TmVar "x", TmVar "x"),
-TmApp ((
-  TmLam (("y", TpPair (TpVar("A"),TpVar("A"))), 
-  TmIf (TmIsZero (TmFst (TmVar "y")), TmSnd (TmVar "y"), TmZero))), 
-  TmVar "p")))
-
-let () = print_count(); check_type program (TpNat)
-
-(* ------ *)
-let test_term = 
-TmMatch (
-  TmPair (TmSucc TmZero, TmTrue), (* term we are matching on *)
-  [
-    (PPair (PVar "x", PFalse), TmFalse);                 (* doesn't match *)
-    (PPair (PSucc PZero, PTrue), TmTrue);                (* matches *)             
-  ]
-)
-
-let () = print_count(); check_type program (TpBool) ; print_endline "<<<"
-
-(* ------ *)
-let prog = TmTypedef (("natPair", TpPair (TpNat, TpNat)), 
-  TmLam (("p", TpVar "natPair"),  TmTrue ))
-
-let () = print_count(); check_type prog  (TpArr ( TpPair (TpNat, TpNat), TpBool) )
-
-(* ------ *)
-let prog = TmTypedef (("natPair", TpPair (TpNat, TpNat)), 
-TmLet ("fst", TmLam (("p", TpVar "natPair") , TmFst (TmVar "p")), 
-TmApp( TmVar "fst", TmPair (TmZero, TmZero)) ))
-
-let () = print_count(); check_type prog  (TpNat) ; print_endline "<<<"
-
-(* ------ *)
-
-
-(* for(i) = if (iszero i) then Unit else for(pred i)*)
-let rec_prog = TmFix ( ("for", TpArr (TpNat, TpUnit)) , 
-TmLam (("i", TpNat), 
-TmIf (TmIsZero (TmVar "i"), TmUnit, TmApp (TmVar "for", TmPred (TmVar "i"))) ), 
-TmApp (TmVar "for", TmSucc (TmSucc (TmZero))) )
-
-let () = print_count(); check_type rec_prog TpUnit
-
-
-(* let x=2 in 
-let y=3 in 
-let add=(λp:(Nat, Nat) if iszero p.fst then p.snd else add (pred p.fst) (succ p.snd)) in
-add ( x, y) *)
-
-let program = TmFix ( ("add", TpArr ( TpPair(TpNat,TpNat), TpNat)) , 
-TmLam ( ("pair", TpPair(TpNat,TpNat) ),
-TmIf (TmIsZero (TmFst (TmVar "pair")), 
-                TmSnd (TmVar "pair"), 
-                TmApp (TmVar "add", (TmPair (TmPred (TmFst (TmVar "pair")), TmSucc (TmSnd (TmVar "pair")))) ))
-                ), TmApp (TmVar "add",  TmPair ((TmSucc (TmSucc (TmZero))), (TmSucc (TmSucc (TmSucc (TmZero)))))))
-                
-
-let () = print_count(); check_type program TpNat
-      
-      
-let prog = 
-TmLet ("x", TmFalse, 
-TmLet ("p", TmPair (TmVar "x", TmVar "x"),
-TmLet ("nat", (
-  TmApp ((
-    TmLam (("y", TpPair (TpVar("A"),TpVar("A"))), 
-    TmIf (TmFst (TmVar "y"), TmSnd (TmVar "y"), TmFalse))), 
-    TmPair (TmFalse, TmTrue))), 
-  TmApp ((
-      TmLam (("y", TpPair (TpVar("A"),TpVar("A"))), 
-      TmIf (TmFst (TmVar "y"), TmVar "nat", TmZero))), 
-      TmVar "p" ))))
-
-let () = print_count(); check_type prog (TpNat)
-
-
-
-let program = 
-  TmLet ("id",  TmLam (("x", TpVar "X"), TmVar "x"), 
-  TmPair (TmApp (TmVar "id", TmZero), TmApp (TmVar "id", TmTrue)))
-let() = print_count(); check_type program (TpPair(TpNat , TpBool))
