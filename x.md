@@ -1,6 +1,4 @@
 ```ocaml 
-
-
 (* AST = Abstract Syntax Tree *)
 type scheme = Forall of (type_name list) * tp 
 
@@ -16,6 +14,7 @@ type term = ...
 | Constructor of name * term list (* <name> (<term list>) *)
 
 type program = top_level list
+type program' = top_level list * term 
 
 (**
 type orig = Orig of int
@@ -33,8 +32,9 @@ let x : orig = Orig 5
 (* Type Checking / Evaluation / Unification *)
 type context = (var_name * scheme) list
 type sigma = (type_name * tp) list
-type signature = (name * tp * const_def list) list
+type signature = (name  * const_def list) list
 type constr = (tp * tp) list
 
 let type_check : signature -> context -> term -> tp ->
 ```
+
