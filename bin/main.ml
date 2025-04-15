@@ -6,7 +6,7 @@ type construct_name = string
 
 type top_level = 
   | Definition of (var_name * tp) * term (* let x : T = t *)
-  | TypeDefinition of (type_name * (construct_name * tp list) list) 
+  | TypeDefinition of (type_name * (construct_name * scheme list) list) 
    (* type <type_name> = 
       | <construct_name> of <tp list>
       | ... *)
@@ -15,7 +15,7 @@ and tp =
   | TpArr of tp * tp    (* T1 -> T2 *)
   | TpPair of tp * tp   (* (T1, T2) *)
   | TpVar of type_name  (* type "X" -- will be inferred *)
-  | TpDefined of type_name  (* top_level user defined type "X" -- concrete type *)
+  | TpDefined of type_name   (* top_level user defined type "X" -- concrete type *)
 and term =
   | TmUnit
   | TmVar of var_name
@@ -51,13 +51,11 @@ and term =
     | PPred of pattern
     | PPair of pattern * pattern
     | PConstructor of (construct_name * pattern list) (* constructor of type X *)
+ 
+and  scheme = Forall of (type_name list) * tp 
 
-
-    
-type scheme = Forall of (type_name list) * tp 
 type context = (var_name * scheme) list
-type constructs = (construct_name * type_name * (tp list))  list 
-(* (type_name * (construct_name * tp list) list) list *) 
+type constructs = (construct_name * type_name * (scheme list))  list 
 type sigma  = (type_name * tp) list
 type constr = (tp * tp) list 
 type program = top_level list * term 
@@ -96,7 +94,9 @@ let rec term_to_str (t:term) : string = match t with
   | TmMatch (t, patterns) -> 
     let patterns_str = List.fold_right (fun (p, e) acc -> "\t| " ^ (pattern_to_str p) ^ " -> " ^ (term_to_str e) ^ "\n" ^ acc) patterns "" in
     "match " ^ (term_to_str t) ^ " with \n" ^ patterns_str
-  | _ -> "??"
+  | TmConstructor (construct_name, args) -> 
+    let args_str = List.fold_right (fun arg acc -> (term_to_str arg) ^ ", " ^ acc) args "" in
+    construct_name ^ "(" ^ (String.sub args_str 0 ((String.length args_str) - 2)) ^ ")"
   and pattern_to_str (p:pattern) : string = match p with
     | PVar x -> x
     | PUnit -> "unit"
@@ -121,6 +121,7 @@ let rec fv_tp (t:tp) : type_name list =
   | TpArr (t1, t2) -> (fv_tp t1) @ (fv_tp t2)
   | TpPair (t1, t2) -> (fv_tp t1) @ (fv_tp t2)
   | TpVar x -> [x] 
+  | TpDefined x -> [] 
   | _ -> []
 let fv_scheme (Forall((vars:type_name list), (t:tp))) : type_name list = 
   List.filter (fun x -> not (List.mem x vars)) (fv_tp t)
@@ -258,7 +259,8 @@ let rec generateconstraints (construct_list : constructs) (ctx : context) (tm : 
         let arg_inferred_type, c = generateconstraints construct_list ctx arg in
         (arg_inferred_type, c))  args )  in
    let inner_constraints = List.flatten args_inner_constraints in
-   let args_constrains = List.map2  (fun x y -> (x, y)) args_inferred_types arg_definitions in
+   let instantiated_arg_defs = List.map (fun arg -> instantiate arg) arg_definitions in
+   let args_constrains = List.map2  (fun x y -> (x, y)) args_inferred_types instantiated_arg_defs in
    (TpDefined construct_type, args_constrains @ inner_constraints )
 
 
@@ -294,12 +296,12 @@ and instantiate (Forall (vars, t):scheme) : tp =  (* REF : url1 *)
         (match List.assoc_opt x subst_list with
           | Some tp -> tp
           | None -> TpVar x)
+    | TpDefined x -> 
+              (match List.assoc_opt x subst_list with
+                | Some tp -> tp
+                | None -> TpDefined x)
     | TpArr (t1, t2) -> TpArr (subst_tp t1, subst_tp t2)
     | TpPair (t1, t2) -> TpPair (subst_tp t1, subst_tp t2)
-    (* 
-    | TpDef (x, t1) -> TpDef (x, subst_tp t1)
-    *)
-    | _ -> t 
   in  subst_tp t 
 and fresh_count  = 
   let count = ref 0 in
@@ -348,49 +350,68 @@ let check_type (program:term) (intended_type:tp) : unit =
     print_endline ("Type check failed: expected " ^ (tp_to_str intended_type) ^ " but got " ^ (tp_to_str result_type))
 (* =============================== *)
 
+
+let check_program ((top_list , main):program) (intended_type:tp) : unit = 
+  let (constructs, ctx) = parse_top_level top_list [] [] in
+  let (inferred_type, constraints) = generateconstraints constructs ctx main in
+  let inferred_subs = unify constraints in
+  let result_type = List.fold_right (fun (x, t_sub) acc -> replace x t_sub acc) inferred_subs inferred_type in
+  if ((tp_to_str result_type) = (tp_to_str intended_type)) then 
+  print_endline ("Type check successful: " ^ (tp_to_str intended_type) )
+else
+  print_endline ("Type check failed: expected " ^ (tp_to_str intended_type) ^ " but got " ^ (tp_to_str result_type))
+  
+
+let top_def = [TypeDefinition ("Xtree", 
+    ["Leaf", [Forall (["X"], TpVar "X")]; 
+     "Node", [Forall ([], TpPair (TpDefined "Xtree", TpDefined "Xtree"))]] )]
+
+let main = TmPair (TmConstructor ("Leaf", [TmZero]), TmConstructor ("Leaf", [TmFalse]))
+
+
+let () = check_program (top_def,  main) (TpPair(TpDefined "Xtree", TpDefined "Xtree"))
+
+
+
+(* === EXAMPLE === *)
+
+(* NAT TREE EXAMPLE 
 type natTree = 
-  | Leaf of int * int 
-  | Node of natTree * natTree
+| Leaf of int * int 
+| Node of natTree * natTree
 
 let nat_def = TypeDefinition ("NatTree", [
-    ("Leaf", [TpNat]);
-    ("Node", [TpPair (TpDefined "NatTree",  TpDefined "NatTree")])
-])
-
-let top_term = Definition (
-  ("mytree", TpDefined "NatTree"),
-  TmConstructor (("Node", [
+  ("Leaf", [TpNat]);
+  ("Node", [TpPair (TpDefined "NatTree",  TpDefined "NatTree")])
+  ])
+  
+  let top_term = Definition (
+    ("mytree", TpDefined "NatTree"),
+    TmConstructor (("Node", [
     TmPair (
       TmConstructor (("Leaf", [TmSucc TmZero])),
       TmConstructor (("Leaf", [TmSucc (TmSucc TmZero)]))
     )
   ]))
-)
-let main1 = TmVar "mytree"
-let main =  TmLet ("x", TmConstructor (("Node", [
-  TmPair (
+  )
+  let main1 = TmVar "mytree"
+  let main =  TmLet ("x", TmConstructor (("Node", [
+    TmPair (
     TmConstructor (("Leaf", [TmZero])),
     TmConstructor (("Leaf", [TmSucc TmZero]))
-  )
-])), TmVar "x")
-
-
-let constructs1 , ctx1 = parse_top_level [nat_def; top_term] [] [] 
-let (inferred_type, constraints)  = generateconstraints constructs1 ctx1 main 
-
-let () = 
-  print_endline ("Inferred type: " ^ (tp_to_str inferred_type))
-
-
-
-let check_program ((top_list , main):program) (intended_type:tp) : unit = 
-    let (constructs, ctx) = parse_top_level top_list [] [] in
-    let (inferred_type, constraints) = generateconstraints constructs ctx main in
-    let inferred_subs = unify constraints in
-    let result_type = List.fold_right (fun (x, t_sub) acc -> replace x t_sub acc) inferred_subs inferred_type in
-    if ((tp_to_str result_type) = (tp_to_str intended_type)) then 
-      print_endline ("Type check successful: " ^ (tp_to_str intended_type) )
-    else
-      print_endline ("Type check failed: expected " ^ (tp_to_str intended_type) ^ " but got " ^ (tp_to_str result_type))
-
-let () = check_program ([nat_def; top_term], main) (TpDefined "NatTree")
+    )
+    ])), TmVar "x")
+    
+    
+    let constructs1 , ctx1 = parse_top_level [nat_def; top_term] [] [] 
+    let (inferred_type, constraints)  = generateconstraints constructs1 ctx1 main 
+    
+    let () = 
+    print_endline ("Inferred type: " ^ (tp_to_str inferred_type))
+    
+    
+    
+      let () = check_program ([nat_def; top_term], main) (TpDefined "NatTree")
+      
+      let () = term_to_str main |> print_endline
+      *)
