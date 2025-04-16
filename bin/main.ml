@@ -15,7 +15,7 @@ and tp =
   | TpArr of tp * tp    (* T1 -> T2 *)
   | TpPair of tp * tp   (* (T1, T2) *)
   | TpVar of type_name  (* type "X" -- will be inferred *)
-  | TpDefined of type_name   (* top_level user defined type "X" -- concrete type *)
+  | TpDefined of type_name * (tp list)   (* top_level user defined type "X" -- concrete type *)
 and term =
   | TmUnit
   | TmVar of var_name
@@ -73,7 +73,7 @@ let rec tp_to_str (t:tp) : string = match t with
   | TpArr (t1, t2) -> "(" ^ (tp_to_str t1) ^ " -> " ^ (tp_to_str t2) ^ ")"
   | TpPair (t1, t2) -> "(" ^ (tp_to_str t1) ^ ", " ^ (tp_to_str t2) ^ ")"
   | TpVar x -> x
-  | TpDefined x -> x
+  | TpDefined (x, l) -> x ^ "(" ^ (String.concat ", " (List.map tp_to_str l)) ^ ")"
 let rec term_to_str (t:term) : string = match t with 
   | TmUnit  -> "unit"
   | TmTrue  -> "true"
@@ -121,7 +121,7 @@ let rec fv_tp (t:tp) : type_name list =
   | TpArr (t1, t2) -> (fv_tp t1) @ (fv_tp t2)
   | TpPair (t1, t2) -> (fv_tp t1) @ (fv_tp t2)
   | TpVar x -> [x] 
-  | TpDefined x -> [] 
+  | TpDefined (x, l) -> List.map (fun y -> fv_tp y) l |> List.flatten 
   | _ -> []
 let fv_scheme (Forall((vars:type_name list), (t:tp))) : type_name list = 
   List.filter (fun x -> not (List.mem x vars)) (fv_tp t)
@@ -136,7 +136,7 @@ let fv_ctx (ctx:context) : type_name list =
 let rec replace (x:type_name) (t:tp) (t':tp) : tp  = (* [X/T] T' *) (* REF: tb section 22.1.1 *)
 match t' with
 | TpVar y -> if y = x then t else t' 
-| TpDefined y -> if y = x then t else t'
+| TpDefined (y, inner_vars) -> if y = x then t else TpDefined (y, List.map (replace x t) inner_vars)
 | TpArr (t1, t2) -> TpArr (replace x t t1, replace x t t2)
 | TpPair (t1, t2) -> TpPair (replace x t t1, replace x t t2)
 | _ -> t'
@@ -149,14 +149,14 @@ let rec parse_top_level (l : top_level list) (cons_ctx: constructs) (var_ctx: co
     let var_ctx' = (x, Forall ([], t)) :: var_ctx in
       parse_top_level rest cons_ctx var_ctx'
   | TypeDefinition (tp_name, cons_list ):: rest -> 
-    let x = parse_cons_list cons_list tp_name [] in
+    let x = parse_construct_list cons_list tp_name [] in
       parse_top_level rest  (x @ cons_ctx) var_ctx
 
-and parse_cons_list (cons_list) (tp_name:type_name) (aux): constructs = 
+and parse_construct_list (cons_list) (tp_name:type_name) (aux): constructs = 
    match cons_list with
    | [] -> [] 
    | (construct_name, args) :: rest -> 
-      (construct_name, tp_name, args) :: parse_cons_list rest tp_name aux
+      (construct_name, tp_name, args) :: parse_construct_list rest tp_name aux
 (* =============================== *)
 
 
@@ -261,8 +261,7 @@ let rec generateconstraints (construct_list : constructs) (ctx : context) (tm : 
    let inner_constraints = List.flatten args_inner_constraints in
    let instantiated_arg_defs = List.map (fun arg -> instantiate arg) arg_definitions in
    let args_constrains = List.map2  (fun x y -> (x, y)) args_inferred_types instantiated_arg_defs in
-   (TpDefined construct_type, args_constrains @ inner_constraints )
-
+   (TpDefined (construct_type, args_inferred_types) , args_constrains @ inner_constraints )
 
 
 and generate_pattern_constraints (ctx:context) (pat:pattern) : context * constr * tp  =
@@ -296,10 +295,13 @@ and instantiate (Forall (vars, t):scheme) : tp =  (* REF : url1 *)
         (match List.assoc_opt x subst_list with
           | Some tp -> tp
           | None -> TpVar x)
-    | TpDefined x -> 
+    | TpDefined (x, inner_vars) -> 
               (match List.assoc_opt x subst_list with
                 | Some tp -> tp
-                | None -> TpDefined x)
+                | None -> (
+                  let inner_vars_subst = List.map subst_tp inner_vars in
+                  TpDefined (x, inner_vars_subst) )
+                )
     | TpArr (t1, t2) -> TpArr (subst_tp t1, subst_tp t2)
     | TpPair (t1, t2) -> TpPair (subst_tp t1, subst_tp t2)
   in  subst_tp t 
@@ -314,25 +316,28 @@ let rec unify (constraints:constr) : sigma =
   match constraints with
   | [] -> []
   | (s, t) :: rest -> 
-    if s = t then unify rest
-    else match (s, t) with 
+    match (s, t) with 
+        | (TpDefined (x1, inner_vars1), TpDefined (x2, inner_vars2)) -> 
+          (* if both are defined as the same , check if they are equal (including their inner vars )*)
+            if x1 = x2 && (inner_vars_are_equal inner_vars1 inner_vars2) then  unify rest 
+              else raise (UnificationError ("Unification failed: " ^ (tp_to_str s) ^ " = " ^ (tp_to_str t)) )
+        | (s, t) when s = t -> unify rest (* BASE CASE  *)
         | (TpArr (s1, s2), TpArr (t1, t2)) -> unify ((s1, t1) :: (s2, t2) :: rest)
         | (TpPair (s1, s2), TpPair (t1, t2)) -> unify ((s1, t1) :: (s2, t2) :: rest)
-        (* 
-        | (TpDef (x, s), t) -> unify ((TpVar x, s) :: (TpVar x , t) :: rest )
-        | (t, TpDef (x, s)) -> unify ((TpVar x, s) :: (TpVar x , t) :: rest )
-        *)
         | (TpVar x, t) when not (occurs x t) -> (x, t) :: unify (subst (x, t) rest)
         | (t, TpVar x) when not (occurs x t) -> (x, t) :: unify (subst (x, t) rest)
+        | (TpDefined (x, inner_vars), t) when not (occurs x t) -> (x, t) :: unify (subst (x, t) rest) 
+        | (t, TpDefined (x, inner_vars)) when not (occurs x t) -> (x, t) :: unify (subst (x, t) rest) 
         | ( _ , _ ) -> raise (UnificationError ("Unification failed: " ^ (tp_to_str s) ^ " = " ^ (tp_to_str t)) )
+and inner_vars_are_equal (i1:tp list) (i2:tp list) : bool = 
+  try List.for_all2 (fun x y -> x = y) i1 i2 
+          with Invalid_argument _ -> false
 and occurs (x:type_name) (t:tp) : bool = (* X ∈ FV(T) *)
   match t with
   | TpVar y -> x = y
   | TpArr (t1, t2) -> occurs x t1 || occurs x t2
   | TpPair (t1, t2) -> occurs x t1 || occurs x t2
-  (*
-  | TpDef (y, t1) -> x = y || occurs x t1
-  *)
+  | TpDefined (y, inner_vars) -> x = y || List.exists (occurs x) inner_vars
   | _ -> false
 and subst ((x:type_name), (t:tp)) (constraints:constr) : constr =  (* [X/T] C *)
   List.map (fun (s, u) -> (replace x t s, replace x t u)) constraints
@@ -362,15 +367,17 @@ else
   print_endline ("Type check failed: expected " ^ (tp_to_str intended_type) ^ " but got " ^ (tp_to_str result_type))
   
 
-let top_def = [TypeDefinition ("Xtree", 
-    ["Leaf", [Forall (["X"], TpVar "X")]; 
-     "Node", [Forall ([], TpPair (TpDefined "Xtree", TpDefined "Xtree"))]] )]
 
-let main = TmPair (TmConstructor ("Leaf", [TmZero]), TmConstructor ("Leaf", [TmFalse]))
-
-
-let () = check_program (top_def,  main) (TpPair(TpDefined "Xtree", TpDefined "Xtree"))
-
+  let top_def = [TypeDefinition ("Xtree", 
+  ["Leaf", [Forall (["X"], TpVar "X")]; 
+  "Node", [Forall ([], TpPair (TpDefined ("Xtree", [TpVar "X"]), TpDefined ("Xtree", [TpVar "X"])))]] )]
+  
+  let main = TmPair (TmConstructor ("Leaf", [TmZero]), TmConstructor ("Leaf", [TmFalse]))
+  
+  
+  let () = check_program (top_def,  main) (TpPair(TpDefined ("Xtree", [TpNat]), TpDefined ("Xtree", [TpBool])))
+  
+  
 
 
 (* === EXAMPLE === *)
