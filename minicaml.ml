@@ -27,8 +27,8 @@ and term =
   | TmZero 
   | TmSucc of term 
   | TmPred of term
-  (* L-calc *)
-  | TmLam of (var_name * tp) * term (*THINK: maybe don't need type in λ (x:T) . t*)(* todo : rm type of lam *)
+  (* λ Calculus *)
+  | TmLam of (var_name * tp) * term 
   | TmApp of term * term
   | TmFix of (var_name * tp)  * term * term 
   (* Pairs *)
@@ -46,10 +46,12 @@ and term =
     | PUnit
     | PTrue | PFalse
     | PZero
+    | PFst | PSnd
     | PSucc of pattern
     | PPred of pattern
     | PPair of pattern * pattern
     | PConstructor of (construct_name * pattern list) (* constructor of type X *)
+    | PElse 
  
 and  scheme = Forall of (type_name list) * tp 
 
@@ -269,7 +271,10 @@ and generate_pattern_constraints (ctx:context) (pat:pattern) constructs : contex
   | PVar x -> ([(x, Forall ([], TpVar x))], [], TpVar x)
   | PUnit -> ([], [], TpUnit)
   | PTrue | PFalse -> ([], [], TpBool)
+  | PFst -> ([], [], TpPair (TpVar "a", TpVar "b"))
+  | PSnd -> ([], [], TpPair (TpVar "a", TpVar "b"))
   | PZero -> ([], [], TpNat) 
+  | PElse -> ([], [], TpVar "a")
   | PSucc n  | PPred n ->let (ctx1, c1, t1) = generate_pattern_constraints ctx n constructs in
                             (ctx1, c1 @ [(t1, TpNat)], TpNat)
   | PPair (p1, p2) -> 
@@ -381,61 +386,106 @@ else
   print_endline ("Type check failed: expected " ^ (tp_to_str intended_type) ^ " but got " ^ (tp_to_str result_type))
   
 
+  (* === Examples === *)
 
-  let top_def = [TypeDefinition ("Xtree", 
-  ["Leaf", [Forall (["X"], TpVar "X")]; 
-  "Node", [Forall ([], TpPair (TpDefined ("Xtree", [TpVar "X"]), TpDefined ("Xtree", [TpVar "X"])))]] )]
-  
-  let main = TmPair (TmConstructor ("Leaf", [TmZero]), TmConstructor ("Leaf", [TmFalse]))
-  
-  
-  let () = check_program (top_def,  main) (TpPair(TpDefined ("Xtree", [TpNat]), TpDefined ("Xtree", [TpBool])))
-  
-  
+(* for(i) = if (iszero i) then Unit else for(pred i) *)
+let () = print_string ("Recursion example: for loop \n\t")
+let rec_prog = TmFix ( ("for", TpArr (TpNat, TpUnit)) , 
+TmLam (("i", TpNat), 
+TmIf (TmIsZero (TmVar "i"), TmUnit, TmApp (TmVar "for", TmPred (TmVar "i"))) ), 
+TmApp (TmVar "for", TmSucc (TmSucc (TmZero))) )
+let () = check_type rec_prog TpUnit
+
+(*  (some 0 , some true) *)
+let () = print_string ("User defined polymorphic example: option \n\t")
+let () = 
+let prog : program = 
+  [TypeDefinition ("Option", 
+    ["Some", [Forall (["X"], TpVar "X")];
+     "None", [Forall ([], TpUnit)]])], 
+  TmPair (TmConstructor ("Some", [TmZero]), 
+          TmConstructor  ("Some", [TmTrue]))
+
+in check_program prog 
+  (TpPair (TpDefined ("Option", [TpNat]), 
+           TpDefined ("Option", [TpBool])))
+
+let () = print_string ("Pattern matching: isZero functionality  \n\t")
+let () = 
+  let prog : program = [], 
+    TmLet ("x", TmSucc (TmZero), 
+    TmMatch (TmVar "x", 
+    [(PZero, TmTrue); 
+    (PSucc (PVar "y"), TmFalse)]))
+  in check_program prog TpBool
 
 
-(* === EXAMPLE === *)
 
-(* NAT TREE EXAMPLE 
-type natTree = 
-| Leaf of int * int 
-| Node of natTree * natTree
 
-let nat_def = TypeDefinition ("NatTree", [
-  ("Leaf", [TpNat]);
-  ("Node", [TpPair (TpDefined "NatTree",  TpDefined "NatTree")])
+(* identity function polymorphism *)
+let () = print_string ("Polymorphism: identity function  \n\t")
+
+let () = 
+let prog : program = [], 
+    TmLet ("id",  TmLam (("x", TpVar "X"), TmVar "x"), 
+    TmPair (TmApp (TmVar "id", TmZero), TmApp (TmVar "id", TmTrue)))
+in check_program prog (TpPair(TpNat , TpBool))
+
+
+
+(* pattern matching on some *)
+let () = print_string ("Pattern matching on user defined types  \n\t")
+let () =
+  let prog  = 
+    [TypeDefinition ("Option", 
+      ["Some", [Forall (["X"], TpVar "X")];
+       "None", [Forall ([], TpUnit)]])], 
+    TmMatch (TmConstructor ("Some", [TmZero]), 
+    [(PConstructor ("Some", [PVar "x"]), TmVar "x"); 
+     (PElse, TmUnit)])
+in check_program prog (TpUnit)
+
+
+
+(* 'a tree *)
+let () = print_string ("Polymorphic tree example  \n\t")
+let x_def = 
+  TypeDefinition ("XTree", [
+    ("Leaf",[Forall(["X"], TpVar "X")]);
+    ("Node",[Forall(["X"], TpPair
+           (TpDefined ("XTree", [TpVar "X"]),
+            TpDefined ("XTree", [TpVar "X"]))
+      )])])
+let prog = [x_def],   TmPair (TmConstructor ("Leaf", [TmZero]), TmConstructor ("Leaf", [TmFalse]))
+ 
+let () = check_program prog (TpPair (TpDefined ("XTree", [TpNat]), TpDefined ("XTree", [TpBool])))
+
+
+(* nat tree *)
+let nat_def = 
+  TypeDefinition ("NatTree", [
+    ("Leaf",[Forall([], TpNat)]);
+    ("Node",[Forall([], TpPair
+           (TpDefined ("NatTree", []),
+            TpDefined ("NatTree", []))
+      )])])
+  
+  
+let prog = [nat_def],   TmPair (TmConstructor ("Leaf", [TmZero]), TmConstructor ("Leaf", [TmSucc (TmZero)]))
+
+
+
+let () = print_string ("Pattern matching: natural numify \n\t")
+
+let prog =
+  [TypeDefinition ("code", [
+    ("nat", [Forall ([], TpNat)]);
+    ("bool",[Forall ([], TpBool)])
+  ])],
+  TmMatch (TmConstructor ("nat", [TmZero]), [
+    (PConstructor ("nat", [PVar "X"]), TmVar "X"); 
+    (PConstructor ("bool",[PFalse]), TmZero); 
+    (PConstructor ("bool",[PTrue]), TmSucc TmZero);
   ])
-  
-  let top_term = Definition (
-    ("mytree", TpDefined "NatTree"),
-    TmConstructor (("Node", [
-    TmPair (
-      TmConstructor (("Leaf", [TmSucc TmZero])),
-      TmConstructor (("Leaf", [TmSucc (TmSucc TmZero)]))
-    )
-  ]))
-  )
-  let main1 = TmVar "mytree"
-  let main =  TmLet ("x", TmConstructor (("Node", [
-    TmPair (
-    TmConstructor (("Leaf", [TmZero])),
-    TmConstructor (("Leaf", [TmSucc TmZero]))
-    )
-    ])), TmVar "x")
-    
-    
-    let constructs1 , ctx1 = parse_top_level [nat_def; top_term] [] [] 
-    let (inferred_type, constraints)  = generateconstraints constructs1 ctx1 main 
-    
-    let () = 
-    print_endline ("Inferred type: " ^ (tp_to_str inferred_type))
-    
-    
-    
-      let () = check_program ([nat_def; top_term], main) (TpDefined "NatTree")
-      
-      let () = term_to_str main |> print_endline
-      *)
 
-
-
+let () = check_program prog TpNat
