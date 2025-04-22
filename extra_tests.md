@@ -1,3 +1,6 @@
+**THESE TESTS DON'T REFLECT THE LATEST VERSION OF THE CODE** 
+**FOR MORE ACCURATE TESTS PLEASE SEE THE END OF `minicaml.ml`**
+
 # Terms and Types Printing Test
 ```ocaml 
 (* print all possible terms *)

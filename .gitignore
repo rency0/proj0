@@ -1,5 +1,3 @@
 *
 !.gitignore
 
-!bin/
-!bin/main.ml
